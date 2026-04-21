@@ -4,6 +4,16 @@
 
 ## 1. Clarify requirements
 
+### 1.0 Live flow (how to open and steer)
+
+<a id="live-flow-open"></a>
+
+**Opening (~once):** *“I’ll align on **split math + rounding**, **audit (void vs delete)**, **multi-currency** if any; then **scale**, **APIs + ledger**, **architecture**, and **POST expense** end-to-end. I’ll **pause after the diagram**—does that work, and where do you want depth: **concurrency**, **settlement**, or **reads vs projector**?”*
+
+**Thinking transitions:** *“Let me think through …”* · *“The invariant I’m holding is …”* · *“If this group is hot I’d …”* · *“Let me sanity-check …”* · *“I’d keep the ledger boring until …”*
+
+**Live rule:** **Paraphrase** §1–2 tables; don’t read every row. Go deep **only if they probe**.
+
 <a id="say-1-questions-human"></a>
 ### 1.1 Clarify 
 
@@ -25,6 +35,8 @@
 #### Human interaction (FR — how to explain after alignment)
 
 **Habit:** *“Ledger story first—then what the app **shows**.”*
+
+**Live:** one **spoken** FR pass (~60–90 s); use [§1.0](#live-flow-open) when you move **FR → NFR**.
 
 | FR area | Say it like this in the room |
 |---------|-------------------------------|
@@ -67,6 +79,12 @@
 | **Reads** | “Balance read should be **O(members)** via **projection**, not **O(expenses)** scan.” |
 | **Security** | “**AuthZ** on group; **Idempotency-Key** on POST expense.” |
 
+#### UX on the money path (say with NFR)
+
+- **Double-submit / flaky mobile:** **`Idempotency-Key`** + clear **201 vs replay** behavior—user never sees **two** expenses for one tap.  
+- **Projector lag:** **“Updating…”** or **read-your-writes** on balance after POST—don’t show **stale net** silently.  
+- **Settlement suggestion:** **invalidate** when ledger changes—don’t show a **stale** “pay X” plan.
+
 **Correctness (dominant)**
 
 - **No silent corruption** of balances under concurrent posts; **audit** who changed what.
@@ -92,9 +110,18 @@
 - **AuthZ**: only members see group; only allowed roles post.  
 - **Idempotency** on POST expense to prevent double-submit.
 
+<a id="key-insight-say-early"></a>
 ### 1.4 Invariants (one sentence you repeat under pressure)
 
 **Invariant:** “**Posted economic events** are not silently rewritten; **corrections** are explicit **void/reversal** entries.”
+
+#### Key anchors (say these confidently—any order)
+
+1. “**Append-only** facts; **balances** are a **projection** we can **rebuild**.”  
+2. “**One transaction** (or explicit projector) per expense—**splits + nets** stay **atomic**.”  
+3. “**Idempotency** on POST—money paths don’t **double** on retry.”  
+4. “**Hot group** = **shard/version/lock** story—say which you pick.”  
+5. “**Outbox** for anything a user **expects** to happen after the commit.”
 
 <a id="say-voice-1"></a>
 
@@ -115,6 +142,8 @@
 #### Human interaction (estimate scale)
 
 **Habit:** *“Most groups are small; stress the **hot group** and **history** tails.”*
+
+**Live:** *“Let me sanity-check scale…”* then **group size**, **posts/day**, **history**—**invite correction** before the dimension table.
 
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
@@ -147,6 +176,7 @@
 | **APIs** | “**POST** expenses and payments; **GET** balances and suggested settlements; **Idempotency-Key** on expense.” |
 | **Schema** | “**Expense + splits** in one transaction with optional **balance_projection** rows—or async projector if we split.” |
 | **Settlement** | “**Nets** from ledger + payments, then **greedy** pairing—**≤ n−1**.” |
+| **Core split (once)** | Same as [Key insight / invariant](#key-insight-say-early)—**append-only** facts vs **projection** + side effects. |
 
 ### 3.1 Public APIs (sketch)
 
@@ -192,6 +222,7 @@
 | **Core** | “**Expense API** → **SQL** sharded by **group_id**; **outbox** for notify and optional **projector**.” |
 | **Read cache** | “**Redis** only accelerates reads—**version**-aware, never the **sole** source of truth.” |
 | **Checkpoint** | “Does **transactional projection** vs **async projector** match how you’d staff this?” |
+| **Steer** | “**Deeper** on **write path**, **settlement read**, or **failure / outbox** next?” |
 
 ```mermaid
 flowchart LR
@@ -209,6 +240,16 @@ flowchart LR
 
 **Narration:** “**Writes** commit to **authoritative SQL**; **outbox** drives **notifications** and optional **async projector**; **Redis** only for **read acceleration** with TTL/version awareness.”
 
+### 4.1 How we’d evolve this (if they ask “phases / MVP”)
+
+| Phase | Ship | Why |
+|-------|------|-----|
+| **1 — MVP** | **Single-region** SQL, **transactional** splits + balance projection, **outbox** for notify | Correctness first |
+| **2 — Growth** | **Async projector** for heavy groups, **keyset** history, **cached** settlement hints | Throughput + UX |
+| **3 — Scale** | **Shard** by `group_id`, **hot-group** playbooks, optional **multi-region** **leader per group** | Tail + DR |
+
+**Taking a stance:** *“I’d start **transactional projection** until **409/lag** metrics hurt; then **append-only + projector** with honest **read lag** UX.”*
+
 ---
 
 ## 5. Deep dive: critical flow
@@ -224,8 +265,11 @@ flowchart LR
 | **Commit** | “**BEGIN** → insert **expense + splits** → bump **projection** (or enqueue work) → **outbox row** → **COMMIT**.” |
 | **Concurrency** | “**Hot group** = contention on one shard—**optimistic version** or **row lock**—I’ll say which I’m picking.” |
 | **Anchor** | “First metrics: **409 conflict rate**, **p99 POST**, **projector lag**.” |
+| **Production voice** | “**Double tap** on POST—**unique idempotency**; **split sum** reject before commit; **outbox relay** stuck—**depth** alert; **hot group**—**version** conflicts spike.” |
 
 This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
+
+**Taking a stance:** *“I’d default **Postgres + shard by `group_id`** with **optimistic version** on projection; **pessimistic** `FOR UPDATE` only if the room wants the simplest story and accepts **contention**.”*
 
 ### 5.1 Add expense (happy path)
 
@@ -296,6 +340,9 @@ sequenceDiagram
 | **Duplicates** | “**Idempotency-Key** + unique constraint—double tap doesn’t double spend.” |
 | **Partial** | “Split sum mismatch → **rollback**—never half an expense.” |
 | **Lag** | “If projector lags, UX says **updating** or we **read primary** after write.” |
+| **Incident tone** | “**Relay lag** on outbox, **409 storms** on spring break trips, **bad migration** on projection—**replay** from ledger is the **escape hatch**.” |
+
+**UX tie-in (say aloud):** *“Money UX: **no silent wrong balance**; **explicit** void/reversal; settlement text matches **latest** projection.”*
 
 - **Duplicate POST:** `Idempotency-Key` + unique `(client_key)` or dedupe table.  
 - **Split sum mismatch:** reject in transaction; never partial insert.  
@@ -317,6 +364,8 @@ sequenceDiagram
 |-------|-------------------------------|
 | **Projection** | “Transactional = **simpler reads**; async = **faster writes**, **temporary lag**.” |
 | **Multi-region** | “**Leader per group** beats split-brain; **CRDT** is a hard sell for arbitrary splits.” |
+| **My default (writes)** | “**Transactional** projection + **outbox** until scale proves **async projector**.” |
+| **My default (reads)** | “**Projection table** for O(members) balance; **keyset** history; **invalidate** settlement on change.” |
 
 ### 8.1 Architecture tradeoffs
 
@@ -407,6 +456,8 @@ Uber **HLD** rewards naming **ledger**, **transaction**, **outbox** where they s
 
 **Habit:** *“**Ledger + projection**, **Unit of Work**, **outbox**, **optimistic concurrency**—tie each to a box.”*
 
+**Live:** **at most four** named patterns on the diagram; then stop.
+
 | You mean… | Say it like this in the room |
 |-----------|-------------------------------|
 | **Patterns** | “**Append-only ledger**; **transaction** for splits + nets; **outbox** for side effects; **version** on projection for **hot group**.” |
@@ -416,7 +467,20 @@ Uber **HLD** rewards naming **ledger**, **transaction**, **outbox** where they s
 
 ## Closing notes (where wrap-up human interaction lives)
 
-Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups) and [60-second close](#60-second-close)—short answers, not a second design pass.
+Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Communication (do vs avoid)](#communication-do-vs-avoid), and [60-second close](#60-second-close)—short answers, not a second design pass.
+
+<a id="communication-do-vs-avoid"></a>
+### Communication (do vs avoid)
+
+| Do (sounds senior) | Avoid (sounds rehearsed) |
+|--------------------|---------------------------|
+| **State the invariant** early | Listing tables with no “why” |
+| **Ask** projection vs sync in the room | One canned diagram with no checkpoint |
+| **Default + caveat** on locks vs optimistic | “Both work” with no pick |
+| **Ack money fear** explicitly | Hand-waving concurrency |
+| **Time-box** deep dives | Finishing every edge case |
+
+**60-minute sketch (flex):** clarify+FR+NFR ~8–12 · scale+APIs ~8–12 · architecture ~8–12 · **deep dive ~15–22** · scale→monitoring ~10–15 · patterns+close ~5–8.
 
 ---
 
