@@ -10,9 +10,11 @@
 
 **Opening (~once):** *“I’ll align on **ranked vs chrono**, **celebrity threshold**, **blocks/safety**, **live updates** (WS vs poll); then **scale**, **APIs + fan-out policy**, **architecture**, and **GET /feed**. I’ll **pause after the diagram**—depth on **fan-out**, **read path + rank**, or **failure**?”*
 
-**Thinking transitions:** *“The hybrid fan-out says …”* · *“If rank blows p99 I’d …”* · *“Let me sanity-check …”* · *“Blocks are a hard filter because …”*
+**Thinking transitions:** *“**Hybrid + cutoff** from day one—pure push breaks at scale …”* · *“If rank blows p99 I’d …”* · *“Let me sanity-check …”* · *“Blocks are a hard filter because …”*
 
 **Live rule:** **Paraphrase** §1–2 tables; don’t read every row. Go deep **only if they probe**.
+
+**User journey (once):** say the [👤 User journey](#user-journey-framing) line **before** the architecture diagram for a **product** entry point.
 
 <a id="say-1-questions-human"></a>
 ### 1.1 Clarify 
@@ -41,7 +43,7 @@
 | FR area | Say it like this in the room |
 |---------|-------------------------------|
 | **Graph** | “**Follow** / unfollow; optional friends-only.” |
-| **Post** | “Create post; **fan-out policy** depends on author size—**hybrid**.” |
+| **Post** | “Create post; **I’d default hybrid fan-out** with a **clear celebrity cutoff** from day one—**pure push** breaks at scale.” |
 | **Feed** | “**Home feed** paginated; ranked vs chrono per product.” |
 | **Safety** | “**Blocks/mutes** enforced on **read path**.” |
 
@@ -117,10 +119,11 @@
 #### Key anchors (say these confidently—any order)
 
 1. “**Timelines store ids**; **hydrate** separately.”  
-2. “**Hybrid fan-out**: **push** normals, **capped pull-merge** for celebs.”  
+2. “**Hybrid fan-out** + **celebrity cutoff** from day one: **push** normals, **capped pull-merge** for celebs—**pure push** doesn’t survive scale.”  
 3. “**Rank** is **time-boxed**; **fallback** to chrono.”  
 4. “**Blocks** enforced on **read path**, not ‘best effort’.”  
-5. “**Fan-out async**—never **O(followers)** synchronous on post.”
+5. “**Fan-out async**—never **O(followers)** synchronous on post.”  
+6. “**User journey** (say once)—[open → fetch → ids → hydrate → rank → page](#user-journey-framing); **write** = post + policy, **read** = assemble + rank + **block** filter.”
 
 <a id="say-voice-1"></a>
 
@@ -128,7 +131,7 @@
 
 | Beat | Say it like this |
 |------|------------------|
-| **Bridge** | “**Push ids** for normals; **pull/merge with cap** for celebrities—never **O(followers)** push for celebs.” |
+| **Bridge** | “**Hybrid + cutoff** from day one: **push ids** below cutoff; **pull/merge cap** for celebs—never **O(followers)** push for celebs.” |
 | **Read path** | “**Ids → hydrate → rank under deadline → mixer**.” |
 
 ---
@@ -168,7 +171,7 @@
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
 | **Model** | “**Timeline** holds **post ids** only; **post service** holds metadata; **graph** owns follows.” |
-| **Hybrid** | “Normals get **pushed ids**; celebs **merge at read** from author shard with a **cap**.” |
+| **Hybrid** | “**Default hybrid** with explicit **celebrity cutoff**: **push ids** below cutoff; **pull-merge cap** above—**pure push** breaks at scale.” |
 | **Core split (once)** | Same as [Key insight / invariant](#key-insight-say-early)—**write distribution** vs **read funnel + safety**. |
 
 ### 3.1 APIs (sketch)
@@ -199,6 +202,24 @@
 
 ---
 
+## 👤 User journey (say once early)
+
+<a id="user-journey-framing"></a>
+
+**Say it once early** (before or right after the [architecture diagram](#4-high-level-architecture)):
+
+*“User **opens** app → **fetches** feed → system pulls **candidate post IDs** → **hydrates** → **ranks** → returns **page**.
+
+When someone **posts** → it either gets **pushed** to timelines (**normal** users) or **pulled at read** (**celebs**).
+
+So:
+- **write path** = **post** + **fan-out policy**  
+- **read path** = **assemble** + **rank** + **filter** (blocks/mutes).”*
+
+👉 **Intuitive**—then map **Post → Fan → TL** and **Ranker** on the diagram.
+
+---
+
 ## 4. High-level architecture
 
 <a id="say-voice-4"></a>
@@ -209,6 +230,7 @@
 | Moment | Say it like this in the room |
 |--------|------------------------------|
 | **Write** | “**Post service** writes metadata; **fan-out worker** fans ids into follower timelines for **non-celeb**.” |
+| **User journey** | “Same beat as [👤 User journey](#user-journey-framing): **GET /feed** = **ids → hydrate → rank**; **post** = **push vs pull** by author class.” |
 | **Read** | “**Feed ranker**: pull **candidate ids**, **batch hydrate**, **rank + mixer**.” |
 | **Steer** | “**Deeper** on **fan-out**, **rank + mixer**, or **reliability** next?” |
 
@@ -236,11 +258,11 @@ flowchart TB
 
 | Phase | Ship | Why |
 |-------|------|-----|
-| **1 — MVP** | **Chrono** feed, **simple push** fan-out for small graphs, **basic** graph store | Learn read/write ratio |
+| **1 — MVP** | **Chrono** feed, **push** for small graphs **but** **define celebrity cutoff** in the model (even if high), **basic** graph store | Learn read/write ratio without celeb debt |
 | **2 — Growth** | **Hybrid** celeb policy, **ranker** with **deadline + fallback**, **CDN** media | Engagement + p99 |
 | **3 — Scale** | **Sharded** timelines, **mixer** slots, **strong** block propagation, **multi-region** reads | Tail + safety |
 
-**Taking a stance:** *“I’d ship **hybrid** the day we name a **follower cutoff**; until then **pure push** is fine for the exercise if the room agrees.”*
+**Taking a stance:** *“**I’d default to hybrid fan-out** with a **clear celebrity cutoff** from **day one**—**pure push** breaks at scale; even in **MVP** I’d **name** the cutoff in the model so we don’t paint ourselves into a corner.”*
 
 ---
 
@@ -258,9 +280,23 @@ flowchart TB
 | **Rank** | “**Time-box** model; on timeout → **chrono** fallback; **mixer** for ads if any.” |
 | **Live** | “**WS/SSE** nudges new **`cursor`**—don’t push full ranked page every tick.” |
 | **Production voice** | “**Fan-out backlog** after viral post—**queue depth** + **batch inserts**; **rank tail** at peak—**deadline + chrono**; **stale blocklist**—**version** inputs to ranker.” |
-| **Anchor** | “First metrics: **fan-out lag**, **feed p99**, **fallback rate**, **empty feed**.” |
+| **Anchor** | “Say **once**—[🎯 Bottleneck Anchor](#bottleneck-anchor-once).” |
 
 This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
+
+<a id="bottleneck-anchor-once"></a>
+### 🎯 Bottleneck Anchor
+
+**Say once in the deep dive:**
+
+The main bottleneck here is:
+
+- **fan-out backlog** for **normal** users (queue / workers / inserts)  
+- **or** **ranker latency** on the **read** path (**p99** tail)
+
+*That’s what I’d **monitor first**.*
+
+👉 Then **fan-out lag**, **feed p99**, **fallback rate**, **empty feed**.
 
 **Taking a stance:** *“I’d default **materialized timeline ids** + **async workers** for normals, **capped celeb merge at read**, and **rank time-box** with **chrono** fallback—**ads/mixer** shed first under load.”*
 
@@ -355,9 +391,9 @@ sequenceDiagram
 
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
-| **Hybrid** | “**Push** makes reads cheap for normals; **celebs** break push at scale.” |
+| **Hybrid** | “**I’d default hybrid fan-out** with a **clear celebrity cutoff** from day one—**pure push** breaks at scale.” |
 | **Rank** | “Heavy rank = engagement vs **p99** tail.” |
-| **My default (fan-out)** | “**Push ids** for normals under a **celebrity cutoff**; **pull-merge cap** above it.” |
+| **My default (fan-out)** | “Same line: **hybrid + cutoff** from day one; **push** below cutoff, **capped pull-merge** for celebs.” |
 | **My default (read)** | “**Hydrate batch** + **deadline rank**; **drop mixer** before **core timeline**.” |
 
 ### 8.1 Core tradeoffs
@@ -408,7 +444,7 @@ Tie **hybrid fan-out**, **CQRS/materialized view**, **cache-aside**, **timeout+f
 
 | Pattern | Where | Why |
 |---------|--------|-----|
-| **Hybrid fan-out** | Normal push + celebrity pull | Write amplification control |
+| **Hybrid fan-out** | Normal push + celebrity pull + **explicit cutoff** | Write amplification control; **pure push** fails at scale |
 | **CQRS / materialized view** | Timeline per user | Read-optimized |
 | **Event-driven** | PostCreated → fan-out workers | Async scale |
 | **Cache-aside** | Hot timeline in Redis | p99 read |
@@ -472,7 +508,7 @@ Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Co
 | **Name celebrity cutoff** | Hand-wavy “we’ll optimize fan-out” |
 | **Checkpoint** after diagram | 25 minutes on rank features unprompted |
 | **Safety on read path** | Treating blocks as eventual nice-to-have |
-| **Default hybrid** with caveat | Pure push with no celeb story |
+| **Hybrid + cutoff** from day one (say once) | Pure push with no celeb story |
 | **Time-box** rank discussion | Finishing every mixer detail |
 
 **60-minute sketch (flex):** clarify+FR+NFR ~8–12 · scale+APIs ~8–12 · architecture ~8–12 · **deep dive ~15–22** · scale→monitoring ~10–15 · patterns+close ~5–8.
@@ -502,6 +538,6 @@ Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Co
 
 | Beat | Say it like this in the room |
 |------|------------------------------|
-| **Recap** | “**Hybrid fan-out**: **push ids** for normals, **pull/merge cap** for celebs. **Read** = timeline **ids** → **batch hydrate** → **time-boxed rank + mixer**; **live** = **cursor** nudges. **Stores**: **graph**, **posts**, **timelines**, **CDN**.” |
+| **Recap** | “**User journey**: **open → fetch → ids → hydrate → rank**. **Hybrid + celebrity cutoff** from day one—**push** normals, **pull-merge cap** celebs. **Fan-out backlog** or **ranker p99** first bottlenecks. **Live** = **cursor** nudges. **Stores**: **graph**, **posts**, **timelines**, **CDN**.” |
 
 ---
