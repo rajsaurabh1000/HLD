@@ -120,7 +120,7 @@
 3. “**At-least-once** fan-out + **idempotent** server + **client dedupe**.”  
 4. “**Shard by `chat_id`**; **hot chat** = **partition skew** or **fan-out queue backlog** first—**materialized inbox** only if that is the proven bottleneck.”  
 5. “**Catch-up** via **`after_seq`**—all devices **converge**.”  
-6. “**User journey** (say once)—[type → send → gateway → persist → ACK → fan-out → offline catch-up](#user-journey-framing); **write** = durability + order, **read** = convergence.”
+6. “**User journey** (say once)—[types → sends → ACK → fan-out → `after_seq`](#user-journey-framing); **write** = durability + order, **read** = convergence.”
 
 <a id="say-voice-1"></a>
 
@@ -191,21 +191,19 @@
 
 ---
 
-## 👤 User journey (say once early)
+## 👤 User journey (say once)
 
 <a id="user-journey-framing"></a>
 
-**Say it once early** (near the [architecture diagram](#4-high-level-architecture)):
+**Say it once** (near the [architecture diagram](#4-high-level-architecture))—**product**, not only boxes:
 
-*“I think of this from **user** perspective:
-
-User **types** a message → **hits send** → message goes to **gateway** → gets **persisted** → **ACK** comes back → then **fan-out** delivers to recipients → if **offline**, they **catch up** via **`after_seq`**.
+*“User **types** a message → **sends** → gets **ACK** (after **durable** persist) → recipients receive via **fan-out** → **offline** users **catch up** via **`after_seq`**.
 
 So:
 - **write path** ensures **durability** + **ordering**  
 - **read path** ensures **convergence** across devices.”*
 
-👉 One pass—**intuitive**, easy to map to **persist → seq → queue → push** on the board.
+👉 **Intuitive**, **product-aware**, then point at **persist → seq → queue → push** on the board.
 
 ---
 
@@ -219,7 +217,7 @@ So:
 | Moment | Say it like this in the room |
 |--------|------------------------------|
 | **Path** | “Client → **LB** → **WS gateway** → **chat service** → **DB** by **`chat_id`**.” |
-| **User journey** | “Same story as [👤 User journey](#user-journey-framing): **send → persist → ACK → fan-out**; offline **`after_seq`**.” |
+| **User journey** | “Same line as [👤 User journey (say once)](#user-journey-framing): **ACK → fan-out → `after_seq`**.” |
 | **Fan-out** | “After commit, enqueue **deliver_to_recipients**; queue pushes back to **gateways**.” |
 | **Registry** | “**Redis** maps user → gateway for the right **push** box.” |
 | **Steer** | “**Deeper** on **persist/ACK**, **fan-out queue**, or **reconnect + replay** next?” |
@@ -279,7 +277,7 @@ This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar 
 
 **Say once in the deep dive:**
 
-The main bottleneck here is:
+The main bottleneck here is **usually**:
 
 - **hot chat** causing **partition skew**  
 - **or** **fan-out queue backlog**
@@ -288,7 +286,7 @@ The main bottleneck here is:
 
 👉 **Prioritization**—then **send p99**, **duplicate rate**, and **GW disconnects** as supporting proof.
 
-**Taking a stance:** *“**I’d start with queue-based fan-out** to online gateways (partitioned by **`chat_id`**), **sticky** pools, **idempotent** persist + **ACK after durable commit**—and **only move to a materialized per-user inbox** if **hot chat** or **fan-out cost** becomes the **bottleneck**.”*
+**Taking a stance:** *“**I’d start with queue-based fan-out**, and **only move to materialized inbox** if **hot chat** or **fan-out cost** becomes a **bottleneck**.”* *“With **sticky** gateways, **`chat_id`** partitioning, **idempotent** persist, and **ACK after durable commit**.”*
 
 ### 5.1 Send message (sequence)
 
@@ -382,9 +380,9 @@ sequenceDiagram
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
 | **Ordering** | “Strong per-chat order is simple; cost is **hot shard**.” |
-| **Inbox** | “Materialize per-user inbox—**fast read home**, **write amplification**.” |
+| **Inbox** | “**Materialized** per-user inbox—**fast read home**, **write amplification**; **I’d start** with **queue fan-out** and **only** add this if it becomes the **bottleneck**.” |
 | **My default (ordering)** | “**Server seq per chat** + **client_msg_id** dedupe—simple story under pressure.” |
-| **My default (fan-out)** | “**Queue-based fan-out** first; **materialized inbox** only when **hot chat** or **fan-out cost** proves the queue model isn’t enough.” |
+| **My default (fan-out)** | “**I’d start with queue-based fan-out**, and **only move to materialized inbox** if **hot chat** or **fan-out cost** becomes a **bottleneck**.” |
 
 | Choice | Upside | Downside |
 |--------|--------|----------|
