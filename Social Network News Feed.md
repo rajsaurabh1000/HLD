@@ -4,6 +4,16 @@
 
 ## 1. Clarify requirements
 
+### 1.0 Live flow (how to open and steer)
+
+<a id="live-flow-open"></a>
+
+**Opening (~once):** *“I’ll align on **ranked vs chrono**, **celebrity threshold**, **blocks/safety**, **live updates** (WS vs poll); then **scale**, **APIs + fan-out policy**, **architecture**, and **GET /feed**. I’ll **pause after the diagram**—depth on **fan-out**, **read path + rank**, or **failure**?”*
+
+**Thinking transitions:** *“The hybrid fan-out says …”* · *“If rank blows p99 I’d …”* · *“Let me sanity-check …”* · *“Blocks are a hard filter because …”*
+
+**Live rule:** **Paraphrase** §1–2 tables; don’t read every row. Go deep **only if they probe**.
+
 <a id="say-1-questions-human"></a>
 ### 1.1 Clarify 
 
@@ -25,6 +35,8 @@
 #### Human interaction (FR — how to explain after alignment)
 
 **Habit:** *“**Graph**, **post**, **distribute**, **read**.”*
+
+**Live:** one **spoken** FR pass (~60–90 s); use [§1.0](#live-flow-open) when you move **FR → NFR**.
 
 | FR area | Say it like this in the room |
 |---------|-------------------------------|
@@ -67,6 +79,12 @@
 | **Consistency** | “Graph can be **eventual** for seconds; **blocks** should feel **fast**.” |
 | **Security** | “**AuthZ** everywhere; **signed** media URLs.” |
 
+#### UX on the feed (say with NFR)
+
+- **Ranker sick:** **chrono fallback**—user still sees a **coherent** slice, not an empty **500**.  
+- **Fan-out lag:** **stale tail** ok for seconds if product allows—**don’t** show blocked accounts.  
+- **Live updates:** **cursor nudge** + client **fetch**—avoid pushing full ranked pages every tick.
+
 **Scale**
 
 - Massive **read:write** ratio; **timeline reads** dominate.
@@ -91,9 +109,18 @@
 
 - **AuthZ** on all reads; **no IDOR** on private posts; **signed URLs** for media.
 
+<a id="key-insight-say-early"></a>
 ### 1.4 Invariants (one sentence you repeat under pressure)
 
 **Invariant:** “**Blocks/mutes** are **hard filters** on candidate ids; a feed response **version** does not contain **duplicate** post ids.”
+
+#### Key anchors (say these confidently—any order)
+
+1. “**Timelines store ids**; **hydrate** separately.”  
+2. “**Hybrid fan-out**: **push** normals, **capped pull-merge** for celebs.”  
+3. “**Rank** is **time-boxed**; **fallback** to chrono.”  
+4. “**Blocks** enforced on **read path**, not ‘best effort’.”  
+5. “**Fan-out async**—never **O(followers)** synchronous on post.”
 
 <a id="say-voice-1"></a>
 
@@ -112,6 +139,8 @@
 #### Human interaction (estimate scale)
 
 **Habit:** *“**DAU** big; **celebrity** is the write trap.”*
+
+**Live:** *“Let me sanity-check…”* **DAU**, **follow graph order**, **celebrity cutoff**—**invite correction**.
 
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
@@ -140,6 +169,7 @@
 |-------|-------------------------------|
 | **Model** | “**Timeline** holds **post ids** only; **post service** holds metadata; **graph** owns follows.” |
 | **Hybrid** | “Normals get **pushed ids**; celebs **merge at read** from author shard with a **cap**.” |
+| **Core split (once)** | Same as [Key insight / invariant](#key-insight-say-early)—**write distribution** vs **read funnel + safety**. |
 
 ### 3.1 APIs (sketch)
 
@@ -180,6 +210,7 @@
 |--------|------------------------------|
 | **Write** | “**Post service** writes metadata; **fan-out worker** fans ids into follower timelines for **non-celeb**.” |
 | **Read** | “**Feed ranker**: pull **candidate ids**, **batch hydrate**, **rank + mixer**.” |
+| **Steer** | “**Deeper** on **fan-out**, **rank + mixer**, or **reliability** next?” |
 
 ```mermaid
 flowchart TB
@@ -201,6 +232,16 @@ flowchart TB
 
 **Narration:** “**Writes** create post + **async fan-out** to timelines for normal users; **reads** pull **candidate ids**, **hydrate**, **rank** under deadline.”
 
+### 4.1 How we’d evolve this (if they ask “phases / MVP”)
+
+| Phase | Ship | Why |
+|-------|------|-----|
+| **1 — MVP** | **Chrono** feed, **simple push** fan-out for small graphs, **basic** graph store | Learn read/write ratio |
+| **2 — Growth** | **Hybrid** celeb policy, **ranker** with **deadline + fallback**, **CDN** media | Engagement + p99 |
+| **3 — Scale** | **Sharded** timelines, **mixer** slots, **strong** block propagation, **multi-region** reads | Tail + safety |
+
+**Taking a stance:** *“I’d ship **hybrid** the day we name a **follower cutoff**; until then **pure push** is fine for the exercise if the room agrees.”*
+
 ---
 
 ## 5. Deep dive: read feed path
@@ -216,8 +257,12 @@ flowchart TB
 | **Hydrate** | “**Batch** post metadata; enforce **blocks** server-side.” |
 | **Rank** | “**Time-box** model; on timeout → **chrono** fallback; **mixer** for ads if any.” |
 | **Live** | “**WS/SSE** nudges new **`cursor`**—don’t push full ranked page every tick.” |
+| **Production voice** | “**Fan-out backlog** after viral post—**queue depth** + **batch inserts**; **rank tail** at peak—**deadline + chrono**; **stale blocklist**—**version** inputs to ranker.” |
+| **Anchor** | “First metrics: **fan-out lag**, **feed p99**, **fallback rate**, **empty feed**.” |
 
 This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
+
+**Taking a stance:** *“I’d default **materialized timeline ids** + **async workers** for normals, **capped celeb merge at read**, and **rank time-box** with **chrono** fallback—**ads/mixer** shed first under load.”*
 
 ```mermaid
 sequenceDiagram
@@ -290,6 +335,9 @@ sequenceDiagram
 |-------|-------------------------------|
 | **Shard fail** | “Return **partial feed** if product allows.” |
 | **Fan-out** | “**Dedupe** `(post_id, follower_id)` on insert; **replay** from log in disaster.” |
+| **Incident tone** | “**Half the followers** missing a post—**fan-out poison** / **shard** issue; **ranker** OOM—**fallback** spike in metrics; **block not applied**—**safety** incident, not ‘algo’.” |
+
+**UX tie-in (say aloud):** *“**Rank down** ≠ **toxic down**—blocks still **hard filter**; **partial shard** might mean shorter page, not wrong **ordering** contract.”*
 
 - **Partial feed:** return available sections if one shard fails (product-dependent).  
 - **Idempotent fan-out:** dedupe on `(post_id, follower_id)` insert.  
@@ -309,6 +357,8 @@ sequenceDiagram
 |-------|-------------------------------|
 | **Hybrid** | “**Push** makes reads cheap for normals; **celebs** break push at scale.” |
 | **Rank** | “Heavy rank = engagement vs **p99** tail.” |
+| **My default (fan-out)** | “**Push ids** for normals under a **celebrity cutoff**; **pull-merge cap** above it.” |
+| **My default (read)** | “**Hydrate batch** + **deadline rank**; **drop mixer** before **core timeline**.” |
 
 ### 8.1 Core tradeoffs
 
@@ -401,6 +451,8 @@ Tie **hybrid fan-out**, **CQRS/materialized view**, **cache-aside**, **timeout+f
 
 **Habit:** *“**Hybrid fan-out**, **materialized timeline**, **Strategy** rankers, **Decorator** mixer.”*
 
+**Live:** **at most four** patterns on the diagram; then stop.
+
 | You mean… | Say it like this in the room |
 |-----------|-------------------------------|
 | **Patterns** | “**Event-driven** fan-out; **CQRS** between post truth and timeline read model; **cache-aside** hot timelines; **bulkhead** rank vs IO.” |
@@ -410,7 +462,20 @@ Tie **hybrid fan-out**, **CQRS/materialized view**, **cache-aside**, **timeout+f
 
 ## Closing notes (where wrap-up human interaction lives)
 
-Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups) and [60-second close](#60-second-close).
+Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Communication (do vs avoid)](#communication-do-vs-avoid), and [60-second close](#60-second-close).
+
+<a id="communication-do-vs-avoid"></a>
+### Communication (do vs avoid)
+
+| Do (sounds senior) | Avoid (sounds rehearsed) |
+|--------------------|---------------------------|
+| **Name celebrity cutoff** | Hand-wavy “we’ll optimize fan-out” |
+| **Checkpoint** after diagram | 25 minutes on rank features unprompted |
+| **Safety on read path** | Treating blocks as eventual nice-to-have |
+| **Default hybrid** with caveat | Pure push with no celeb story |
+| **Time-box** rank discussion | Finishing every mixer detail |
+
+**60-minute sketch (flex):** clarify+FR+NFR ~8–12 · scale+APIs ~8–12 · architecture ~8–12 · **deep dive ~15–22** · scale→monitoring ~10–15 · patterns+close ~5–8.
 
 ---
 
