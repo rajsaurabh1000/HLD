@@ -12,6 +12,10 @@
 
 **Thinking transitions:** *“Not every **GPS tick** belongs in **OLTP**—**separate hot path** from **trip facts**.”*
 
+**Live rule:** Paraphrase tables; deep on **fan-out** or **consistency** only if steered.
+
+**User journey (once):** say [👤 User journey](#user-journey-framing) **before** the architecture diagram.
+
 <a id="say-1-questions-human"></a>
 ### 1.1 Clarify
 
@@ -60,13 +64,13 @@
 <a id="key-insight-say-early"></a>
 ### Key insight (say early)
 
-**Decouple** high-frequency **telemetry** from **transactional trip DB**—use **stream + short-lived store + pub/sub**.
+**Decouple** high-frequency **telemetry** from **transactional trip DB**—use **durable append log + latest snapshot + pub/sub**; **location** is **eventually consistent**—see [⚖️ Consistency Model](#consistency-model-anchor).
 
 #### Key anchors
 
 1. “**WebSocket / MQTT** to viewers; **gRPC** internal.”  
-2. “**Last-known** in **Redis**; **Kafka** for analytics.”  
-3. “**Region-local** ingest.”
+2. “I’d **default to Kafka** (or Pulsar) for the **location event log**—**durability**, **replay**, **analytics** consumers; **Redis only** for **latest snapshot** + fast read path—not as the **system of record** for history.”  
+3. “**Region-local** ingest; **backpressure** when spikes hit—see [🚦 Backpressure](#backpressure-handling).”
 
 ---
 
@@ -101,29 +105,99 @@
 
 ---
 
+## 👤 User Journey (say once early)
+
+<a id="user-journey-framing"></a>
+
+**Say it once early** (before or right after the [architecture diagram](#4-high-level-architecture)):
+
+*“From the **product** side:
+
+**Driver sends location updates** → the system **ingests** and **processes** them → the **latest** position is **stored** → the **rider sees real-time movement** on the map.
+
+So:
+- **Write path** = **location ingestion** (validate, authenticate, accept batch)
+- **Stream path** = **processing** + **distribution** (consume log, update snapshot, notify fan-out)
+- **Read path** = **fan-out** to **authorized viewers** (WS / poll), always scoped to **trip** context”*
+
+👉 **Intuitive** before you draw **Kafka**, **Redis**, and **WS**.
+
+---
+
+## ⚖️ Consistency Model
+
+<a id="consistency-model-anchor"></a>
+
+**Bar Raiser:** *“Is location **strongly** consistent?”*
+
+**Say clearly:**
+
+**Location tracking is eventually consistent.** We optimize for:
+
+- **Freshness** over **strict global ordering** of every point  
+- **Latest snapshot** over **perfect historical** replay on the **hot path** (history lives in the **log/lake** with its own SLOs)
+
+**Trip state** (assignment, phase, fare contract) stays **strongly consistent** in **Trip service**—see [18-hld-uber-ride-sharing-backend.md](./18-hld-uber-ride-sharing-backend.md). **Do not** conflate **map pin freshness** with **trip lifecycle correctness**.
+
+**One-liner:** *“**Pin** can lag **seconds**; **‘you have a driver’** cannot be a **cache guess**.”*
+
+---
+
+## 🚦 Backpressure Handling
+
+<a id="backpressure-handling"></a>
+
+**If ingest rate spikes** (burst GPS, bad client loop, viral event):
+
+- **Drop or downsample** **intermediate** points—keep **monotonic ‘latest wins’** semantics per `driver_id` / trip.  
+- **Prioritize latest location** on the **snapshot** path over persisting **every** sub-second sample to **all** sinks.  
+- **Protect fan-out latency** (rider **p99**) over **full** history on the **real-time** pipe—**extra** detail can land in **cold** storage **async**.
+
+👉 Signals **streaming maturity**: **shed** work **gracefully**, don’t **queue unbounded** until the **WS tier** dies.
+
+---
+
+## 👤 UX Awareness
+
+<a id="ux-awareness"></a>
+
+If updates are **delayed**, the rider should still see **last-known** position and a **clear loading / “catching up”** state—**not** a **blank map**, a **jumping pin** with no context, or a **silent** freeze. **Reconnect** = **last-known** from snapshot, then **live** tail—aligns with [§7](#7-reliability-and-failure-handling).
+
+---
+
 ## 4. High-level architecture
 
 <a id="say-voice-4"></a>
+#### Human interaction (high-level architecture)
+
+| Moment | Say it like this in the room |
+|--------|------------------------------|
+| **User journey** | “Same beat as [👤 User journey](#user-journey-framing): **driver emits → ingest → process → latest → rider map**.” |
+| **Stores** | “**Kafka** = **durable** event log + replay; **Redis** = **latest snapshot** only—[Key anchors](#key-insight-say-early).” |
+| **Consistency** | “[⚖️ Location is eventual](#consistency-model-anchor); **Trip** stays **strong** elsewhere.” |
+| **Spikes** | “[🚦 Backpressure](#backpressure-handling)—downsample, **latest wins**, protect **WS**.” |
 
 ```mermaid
 flowchart TB
   D[Driver app]
   ING[Ingest API]
-  K[Kafka / Pulsar]
+  K[Kafka durable log]
   LP[Location processor]
-  RU[(Redis latest)]
+  RU[(Redis latest snapshot)]
   PS[Pub/Sub / fanout svc]
   R[Rider WS]
   D --> ING --> K --> LP --> RU
   LP --> PS --> R
 ```
 
+**Default stance:** **Kafka** for the log (**Pulsar** acceptable same role); **not** “Redis Streams as primary history” unless scope is **tiny**—say why if you diverge.
+
 ### 4.1 Phases
 
 | Phase | Ship |
 |-------|------|
 | **1** | HTTP batch + long poll |
-| **2** | WS + Redis latest + Kafka |
+| **2** | WS + **Redis latest** + **Kafka** log (**default** split: durability vs snapshot) |
 | **3** | Edge POP ingest, regional fan-out |
 
 ---
@@ -131,6 +205,9 @@ flowchart TB
 ## 5. Deep dive: ingest → fan-out
 
 <a id="say-voice-5"></a>
+#### Human interaction (deep dive)
+
+**Habit:** *“Walk **ingest → log → snapshot → push**; name [⚖️ eventual](#consistency-model-anchor) + [🚦 backpressure](#backpressure-handling) if they push.”*
 
 <a id="bottleneck-anchor-once"></a>
 ### 🎯 Bottleneck Anchor
@@ -153,7 +230,7 @@ sequenceDiagram
   WS-->>Rider: push JSON
 ```
 
-**Taking a stance:** *“**Coalesce** updates **per trip** to e.g. **2–5 Hz** viewer effective rate even if ingest is higher.”*
+**Taking a stance:** *“**Coalesce** updates **per trip** to e.g. **2–5 Hz** viewer effective rate even if ingest is higher—that’s **backpressure** on the **fan-out** path, not ‘losing’ the driver.”*
 
 ---
 
@@ -164,14 +241,16 @@ sequenceDiagram
 | **WS connection storms** | **Shard** connection gateways; **STUN**/edge |
 | **Hot trip** | **Channel** per trip; **cap** message rate |
 | **Lag** | **Monitor consumer lag**; **scale** LP |
+| **Ingest storm** | [🚦 Downsample / latest wins](#backpressure-handling); **cap** queue depth at ingest |
 
 ---
 
 ## 7. Reliability and failure handling
 
 - **At-least-once** ingest → **idempotent** write by `(driver_id, seq)`.  
-- **Viewer reconnect:** send **last-known** from Redis then **live**.  
-- **Partition:** **sticky routing** for WS.
+- **Viewer reconnect:** send **last-known** from Redis then **live**—[👤 UX Awareness](#ux-awareness).  
+- **Partition:** **sticky routing** for WS.  
+- **Processor overload:** apply [🚦 Backpressure](#backpressure-handling); never **unbounded** RAM on fan-out.
 
 ---
 
@@ -179,7 +258,7 @@ sequenceDiagram
 
 | Choice | Trade |
 |--------|--------|
-| **Kafka vs Redis streams** | Durability vs simplicity |
+| **Kafka (default) vs Redis Streams as primary log** | **Kafka**: durability + replay + many consumers; **Redis Streams** only if **small** scale / ops simplicity—**Redis** stays **latest snapshot** in the **default** story |
 | **Map on device vs server** | Battery vs consistency |
 
 ---
@@ -212,6 +291,8 @@ sequenceDiagram
 |----|--------|
 | **Separate hot path** | Every GPS in SQL row |
 | **AuthZ on subscribe** | Public driver id channels |
+| **[⚖️ Say eventual for pins](#consistency-model-anchor)** | Pretend map == **trip** **strong** consistency |
+| **[👤 Last-known + loading](#ux-awareness)** | Blank map on slow tail |
 
 ---
 
@@ -221,6 +302,8 @@ sequenceDiagram
 |----------|------------------|
 | **Ghost locations** | “**Kalman** / map-match **downstream**; flag **spoof** for fraud.” |
 | **Global trip** | “**Roaming**—handoff **region** with **session** token.” |
+| **Strong vs eventual** | “[⚖️ Pins eventual](#consistency-model-anchor); **Trip** **strong** for lifecycle.” |
+| **Burst traffic** | “[🚦 Downsample, latest wins, protect fan-out](#backpressure-handling).” |
 
 ---
 
@@ -228,6 +311,6 @@ sequenceDiagram
 
 | Beat | Say it like this |
 |------|------------------|
-| **Recap** | “**Batch ingest** → **stream** → **latest in Redis** → **WS fan-out** by **trip**; **not OLTP**; **lag** + **connection** SLIs; **privacy** scoped to **relationship**.” |
+| **Recap** | “**User journey**: **driver emits → ingest → process → latest → rider map**. **Write / stream / read** split. **Default: Kafka** = durable log + replay; **Redis** = **latest snapshot** only. [⚖️ **Location eventual**](#consistency-model-anchor); **Trip** **strong** elsewhere. [🚦 **Backpressure**](#backpressure-handling): downsample, **latest wins**, protect **WS**. [👤 **UX**](#ux-awareness): **last-known** + loading, not blank. **SLIs**: fan-out **p99**, consumer **lag**, drops.” |
 
 ---
