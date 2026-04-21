@@ -1,169 +1,39 @@
 # HLD — E-Commerce Product Browsing (No Checkout)
 
-> **GitHub README style** — diagrams render on GitHub. Pair with [HLD-README.md](./HLD-README.md).
-
-| | |
-|--|--|
-| **Round** | 45–60 min |
-| **Uber-style signal** | Read-heavy catalog + **firehose events** + **AP** browse vs **CP** money path + **clear Mongo payload** |
-
----
-
-## Table of contents
-
-**Prep**
-
-- [Interview plan](#interview-plan)
-- [SDE-2 drive kit (Senior interviewer)](#sde-2-drive-kit-senior-interviewer)
-- [Strong-hire signals](#strong-hire-signals)
-- [Coverage map](#coverage-map)
-
-**Interview spine (nine steps)**
-
-- [Interview spine (nine steps)](#interview-spine-nine-steps)
-- [1. Clarify requirements](#1-clarify-requirements)
-- [2. Estimate scale](#2-estimate-scale)
-- [3. APIs and data model](#3-apis-and-data-model)
-- [4. High-level architecture](#4-high-level-architecture)
-- [5. Deep dive: critical flow](#5-deep-dive-critical-flow)
-- [6. Scaling and bottlenecks](#6-scaling-and-bottlenecks)
-- [7. Reliability and failure handling](#7-reliability-and-failure-handling)
-- [8. Tradeoffs and alternatives](#8-tradeoffs-and-alternatives)
-- [9. Monitoring, observability, and security](#9-monitoring-observability-and-security)
-- [10. Design patterns, data structures & best practices](#10-design-patterns-data-structures--best-practices)
-
-**Wrap-up**
-
-- [Bar-raiser follow-ups](#bar-raiser-follow-ups)
-- [Strong Hire room checklist](#strong-hire-room-checklist)
-- [60-second close](#60-second-close)
-
----
-
-## Interview plan
-
-> “Scope is **browse only**—no checkout—but we still ingest **purchase** as a **strong signal**. I’ll clarify identity and freshness, outline **Kafka → stream agg → Redis** for popularity, **Mongo** (or docs elsewhere) for flexible catalog reads, and **search** as its own index. I’ll deep dive **event ingestion + idempotency**, then **CAP** for browse vs money. Pause me after the diagram if you want more on **storage** or **pipeline**.”
-
----
-
-## SDE-2 drive kit (Senior interviewer)
-
-### A. Lock the agenda (30–45 sec)
-
-Say: plan = clarify → scale → APIs/model → architecture → **(PDP path + separate event path)** → bottlenecks → reliability → tradeoffs → monitoring/security. Then: **“Does that sequencing work?”** If they care about **compliance** or **fraud**, star it for §9.
-
-### B. Questions to ask — **this order**
-
-| # | Ask (intent) |
-|---|----------------|
-| 1 | “Confirm **browse only**—but do **purchase events** still exist as signals from elsewhere?” |
-| 2 | “**Guest** vs logged-in events—do we need **merge** across devices?” |
-| 3 | “How stale can **trending** be—**seconds vs minutes**—and do we label it?” |
-| 4 | “**p99** for PDP vs PLP—different budgets?” |
-| 5 | “**Search**—first-class here or separate team/service?” |
-| 6 | “**GDPR** delete / retention on behavioral stream?” |
-| 7 | “**Bots**—should invalid traffic hit Kafka or get dropped at edge?” |
-| 8 | “**‘Bestseller’** semantics—must equal **purchase counts** only?” |
-
-**After each:** “So I’ll treat that as **…** in the design.”
-
-### C. What to explain — **sentence per spine step**
-
-| Step | Winning line |
-|------|----------------|
-| 1 | “**Serving path** never blocks on Kafka; **firehose** is parallel.” |
-| 2 | “**100×–1000×** more views than purchases ⇒ **async aggregation**.” |
-| 3 | “**Mongo** = **read-optimized product doc** + denormalized popularity; **purchases** stay **OLTP**.” |
-| 4 | “Diagram: **BFF → Catalog/Search/Cache** + parallel **beacon → Kafka → Flink → Redis/doc patch**.” |
-| 5 | “Deep dive: **PDP cache-aside** and **event path**: validate → partition → dedupe → aggregate → sink.” |
-| 6 | “Bottlenecks: **Kafka lag**, **hot SKU**, **stampede**, enrichment misses.” |
-| 7 | “**DLQ + replay**; PDP **degrades** without trending block if Redis down.” |
-| 8 | “**AP** on browse scores; **CP** only on financial truth if extended.” |
-| 9 | “Lag, duplicates, **p99 PDP**; **rate limits** + **PII hygiene** on `/events`.” |
-
-### D. Whiteboard order
-
-1. Two parallel pipes: **Read** vs **Ingest** (explicitly decoupled).  
-2. Boxes: Gateway → Browse → **Catalog Mongo** + **Search** + **Redis**.  
-3. Below: **Kafka → Stream job → Redis / doc denorm**.  
-4. Sequence: **GET PDP** OR **POST events**—pick **one** sequence first, ask for second.
-
-### E. Senior probes → crisp answers
-
-| Probe | Answer |
-|-------|--------|
-| “Why Kafka not write straight to Mongo?” | “**Replay**, **fan-out** to multiple consumers, **backpressure**; Mongo isn’t the unified log.” |
-| “CAP?” | “**AP** for trending/read cache; **CP** where money/inventory commits live (out of scope or handoff).” |
-| “Exactly-once events?” | “Usually **at-least-once** + **idempotent** sinks + **event_id** dedupe.” |
-| “‘What’s in Mongo?’” | Walk through [§3.4](#34-mongodb-document-example-interviewer-favorite) JSON; say **shard key** (product vs seller tradeoff). |
-| “Purchase disagrees with trending?” | “Separate **labels** and score pipelines; purchase-**weighted** channel for ‘bestseller’.” |
-
-### F. Time crunched → pick **two** deep dives
-
-**PDP read path** + **event dedupe/idempotency**. Say it aloud.
-
-### G. Anti-patterns
-
-- Blocking PDP on **sync** Kafka produce.  
-- Trending = Redis with **no** OLAP truth story.  
-- Search blended into **Mongo** “because easy.”
-
----
-
-## Strong-hire signals
-
-- You separate **beacon ingest** from **serving path** (never block PDP on Kafka).  
-- You answer **“what’s in Mongo?”** with a **concrete document** and **shard key** reasoning.  
-- You state **at-least-once** + **dedupe keys** explicitly.  
-- You compare **SQL catalog** vs **document catalog** honestly for **this** workload.
-
----
-
-## Coverage map
-
-- [ ] Walk the [nine-step spine](#interview-spine-nine-steps) in order  
-- [ ] Event types: view, cart, wishlist, purchase  
-- [ ] **Kafka** topics, partitioning, **DLQ**  
-- [ ] **Stream processor** rollups (windows)  
-- [ ] **Redis** top-K / UV approximations  
-- [ ] **Mongo** vs SQL — document example  
-- [ ] **OpenSearch** for text  
-- [ ] **CAP** answer tailored to browse  
-- [ ] **Observability:** lag, duplicates, PDP latency  
-
----
-
-## Interview spine (nine steps)
-
-| Step | What you deliver | Section |
-|------|------------------|---------|
-| **1** | Clarify requirements | [§1](#1-clarify-requirements) |
-| **2** | Estimate scale | [§2](#2-estimate-scale) |
-| **3** | APIs / data model | [§3](#3-apis-and-data-model) |
-| **4** | High-level architecture | [§4](#4-high-level-architecture) |
-| **5** | Deep dive critical flow | [§5](#5-deep-dive-critical-flow) |
-| **6** | Scaling / bottlenecks | [§6](#6-scaling-and-bottlenecks) |
-| **7** | Reliability / failure handling | [§7](#7-reliability-and-failure-handling) |
-| **8** | Tradeoffs / alternatives | [§8](#8-tradeoffs-and-alternatives) |
-| **9** | Monitoring / security | [§9](#9-monitoring-observability-and-security) |
-
----
+<a id="interview-spine-nine-steps"></a>
 
 ## 1. Clarify requirements
 
-### 1.1 Questions to ask first
+<a id="say-1-questions-human"></a>
+### 1.1 Clarify 
 
-| Question | Why it matters |
-|----------|----------------|
-| Guest vs logged-in events? | Identity, merge, attribution |
-| Cross-device identity? | Deduping same human |
-| GDPR delete / retention on events? | Pipeline, legal |
-| Regional catalog / pricing? | Sharding, CDN |
-| Is **checkout** truly out of scope—but **purchase events** exist? | Source of truth for “bestseller” |
-| **Real-time** trending vs **minutes** lag acceptable? | Stream windows, Redis TTL |
-| Bot / fraudulent traffic? | Validation before Kafka |
+| Topic | Say it like this in the room |
+|--------------------------|-------------------------------|
+| **Browse vs purchase signal** | “We’re **browse only**—but **purchase events** still exist as signals from the order path, right?” |
+| **Identity** | “**Guest** vs logged-in—do we need **merge** across devices for attribution?” |
+| **Freshness** | “How stale can **trending** be—**seconds vs minutes**—and do we **label** it in the UI?” |
+| **Latency** | “Different **p99** for **PDP** vs **PLP**, or one budget?” |
+| **Search** | “Is **search** in my box or a **separate** index team—I’ll treat OpenSearch as **delegated** if separate.” |
+| **Compliance** | “**GDPR** delete / retention on the **behavioral** stream—anything I must wire now?” |
+| **Abuse** | “Should bad traffic hit **Kafka** or get **dropped** at the edge?” |
+| **Semantics** | “If we say **bestseller**, does that **have** to mean **purchase counts** only?” |
 
-### 1.2 Functional requirements (FR)
+**Micro-pauses:** *“So I’ll never block **PDP** on Kafka; purchase-backed labels trace to **order facts**.”*
+
+### 1.2 Functional requirements (FR) — after alignment, say this as “what we must build”
+
+<a id="say-fr-human"></a>
+#### Human interaction (FR — how to explain after alignment)
+
+**Habit:** *“Once scope is clear—**catalog reads** plus a parallel **signal** pipe.”*
+
+| FR area | Say it like this in the room |
+|---------|-------------------------------|
+| **Catalog** | “**Categories**, **PLP** with filters and **cursor** pagination, **PDP** with media, price, seller, and a **popularity** snippet.” |
+| **Trending** | “Rails on home or category from **aggregated** signals—**honest labels** when data lags.” |
+| **Events** | “**View / cart / wishlist / purchase** at high volume—**batch** beacons ok; they feed ranking and BI, not the hot read path.” |
+| **Search** | “Keyword + filters go to **OpenSearch** (or equivalent)—not `LIKE` in the catalog store.” |
+| **Out of scope** | “**Checkout / inventory** stay out unless you extend—I only mention **handoff**.” |
 
 **Catalog browsing**
 
@@ -186,7 +56,20 @@ Say: plan = clarify → scale → APIs/model → architecture → **(PDP path + 
 
 - **Payment, cart checkout, inventory reservation**—acknowledge and define **handoff** for consistency if interviewer expands.
 
-### 1.3 Non-functional requirements (NFR)
+### 1.3 Non-functional requirements (NFR) — say as “how it must behave”
+
+<a id="say-nfr-human"></a>
+#### Human interaction (NFR — how to say “how it must behave”)
+
+**Habit:** *“Browse can be **soft**; **p99** and **truth for labels** are **hard**.”*
+
+| NFR area | Say it like this in the room |
+|----------|-------------------------------|
+| **p99** | “Explicit **latency budget** for PDP/PLP; **stream lag** for trending is a **different** SLO.” |
+| **Decouple** | “**Serving never blocks** on Kafka produce—**202** accept or async client path.” |
+| **CAP** | “**AP** on browse scores and cache; **CP** only where money commits—out of scope or **handoff**.” |
+| **Durability** | “Raw events live in the **log + lake**; workers are **at-least-once** with **idempotent** sinks.” |
+| **Compliance** | “Minimal **PII** in beacons; **retention** and delete path for GDPR.” |
 
 **Performance**
 
@@ -218,13 +101,33 @@ Say: plan = clarify → scale → APIs/model → architecture → **(PDP path + 
 - **PII** minimization in event payloads; **retention** and **delete** path for GDPR.  
 - **Rate limits** on `/events` and browse APIs.
 
-### 1.4 Invariant
+### 1.4 Invariants (one sentence you repeat under pressure)
 
 **Invariant:** “We never label something **‘bestseller from purchases’** unless that signal is **grounded in purchase facts**; **views** may drive **‘trending’** if we label it honestly.”
+
+<a id="say-voice-1"></a>
+
+**Purpose:** no second clarify lecture—only **handoff** from answers → boxes.
+
+| Beat | Say it like this |
+|------|------------------|
+| **Bridge** | “If trending can lag, I’ll use **Kafka → Flink → Redis** and denorm on the doc; I still won’t fake **purchase-backed** labels.” |
+| **Core split** | “**Read** = BFF + catalog + search + cache; **write signals** = beacon → log → aggregate—**never** coupled on the critical path.” |
 
 ---
 
 ## 2. Estimate scale
+
+<a id="say-voice-2"></a>
+#### Human interaction (estimate scale)
+
+**Habit:** *“Round numbers—correct me if your model’s different.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Read vs write** | “Views are **100×–1000×** purchases—PDP is **cache-shaped**, firehose is **Kafka-shaped**.” |
+| **Hot SKU** | “A few SKUs eat the stream—I need **partition** + **aggregation** story, not one hot Redis key.” |
+| **Invite correction** | “If your ratio is off by 10×, I change **partitions** and cache—not the **two-pipe** architecture.” |
 
 | Dimension | Illustrative | Implication |
 |-----------|----------------|-------------|
@@ -235,9 +138,23 @@ Say: plan = clarify → scale → APIs/model → architecture → **(PDP path + 
 
 **Talk track:** “PLP/PDP are **cache-shaped**; the firehose is **Kafka-shaped**; we **decouple** them so a spike in views never **blocks** a product read.”
 
+**Tie it in one line:** “Optimize **read latency** and **bounded** stream work; **never** sync-block catalog on Kafka.”
+
 ---
 
 ## 3. APIs and data model
+
+<a id="say-voice-3"></a>
+#### Human interaction (APIs & data model)
+
+**Habit:** *“Thin API contract; honest data ownership.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **APIs** | “**GET** categories, PLP, PDP, trending; **POST /events** is **async** accept into the log.” |
+| **Stores** | “**Mongo** (or doc) for flexible catalog reads; **Redis** for rollups; **OpenSearch** for text; **orders** stay **OLTP** for truth.” |
+| **Mongo story** | “I can walk the **document**—shard by **product_id** vs **seller_id** is a real tradeoff.” |
+| **Metrics** | “**Bestseller** is defined from **order facts** in the warehouse; Redis **mirrors** with known lag.” |
 
 ### 3.1 Public APIs (sketch)
 
@@ -289,6 +206,17 @@ Say: plan = clarify → scale → APIs/model → architecture → **(PDP path + 
 
 ## 4. High-level architecture
 
+<a id="say-voice-4"></a>
+#### Human interaction (high-level architecture / HLD)
+
+**Habit:** *“Walk it like two parallel pipes, not one blob.”*
+
+| Moment | Say it like this in the room |
+|--------|------------------------------|
+| **Read path** | “**Gateway → BFF → catalog + Redis + search**—that’s the user-facing **PDP/PLP**.” |
+| **Signal path** | “**Beacon → Kafka → stream job → Redis + optional doc patch**—parallel to reads.” |
+| **Checkpoint** | “Pause here—does this **split** match how you’d **shard teams**?” |
+
 ```mermaid
 flowchart TB
   Client[Web / App]
@@ -324,6 +252,20 @@ flowchart TB
 ---
 
 ## 5. Deep dive: critical flow
+
+<a id="say-voice-5"></a>
+#### Human interaction (deep dive — critical flow)
+
+**Habit:** *“Pick **one** path like a debugger—usually **GET PDP** then **POST events**.”*
+
+| Step | Say it like this in the room |
+|------|-------------------------------|
+| **PDP** | “**Cache-aside** with **ETag**; on miss, one **document** fetch—no **N+1**.” |
+| **Events** | “Validate → **partition** → **dedupe** (`event_id`) → **aggregate** with weights **purchase > cart > view** → sink Redis / denorm.” |
+| **Idempotency** | “**At-least-once** Kafka ⇒ **idempotent** consumers and keys.” |
+| **Anchor** | “First thing I’d instrument: **Kafka lag**, **hot SKU partition**, or **cache stampede** on a viral PDP.” |
+
+This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
 
 ### 5.1 Browse read (PDP)
 
@@ -363,6 +305,17 @@ sequenceDiagram
 
 ## 6. Scaling and bottlenecks
 
+<a id="say-voice-6"></a>
+#### Human interaction (scaling & bottlenecks)
+
+**Habit:** *“Name what breaks first—then the fix sounds obvious.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Kafka lag** | “Scale **consumers**, shed **analytics**, watch **partition** skew.” |
+| **Hot SKU** | “**Coalesce** in partition, secondary agg, **rate limit** per key.” |
+| **Stampede** | “**Single-flight**, **TTL jitter**, warm keys on deploy.” |
+
 | Risk | Mitigation |
 |------|------------|
 | Kafka **consumer lag** | Autoscale consumers; prioritize topics; shed analytics |
@@ -378,6 +331,17 @@ sequenceDiagram
 
 ## 7. Reliability and failure handling
 
+<a id="say-voice-7"></a>
+#### Human interaction (reliability & failure handling)
+
+**Habit:** *“Degrade rails before you degrade the whole PDP.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **PDP vs Kafka** | “**Never** sync **ack** Kafka on the critical PDP path.” |
+| **Retries** | “**Jitter**, **cap**, only where **idempotent**.” |
+| **Partial** | “Drop **trending** block before failing the whole page if Redis is sick.” |
+
 - **Never** synchronous **Kafka** on critical PDP—use **async buffer** or fire-and-forget with client retry.  
 - **Retries** with jitter on stream sinks; **idempotent** writes to Redis/Mongo.  
 - **Dead-letter** path for bad payloads; **replay** after fix.  
@@ -389,6 +353,17 @@ sequenceDiagram
 ---
 
 ## 8. Tradeoffs and alternatives
+
+<a id="say-voice-8"></a>
+#### Human interaction (tradeoffs & alternatives)
+
+**Habit:** *“Name the trade, pick a side, say what flips it.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Mongo vs SQL** | “**Flex** for catalog vs **joins** for reporting—pick for **this** workload.” |
+| **Windows** | “Bigger trending window = **smooth**; tiny = **noisy**.” |
+| **Kafka vs direct write** | “Direct to Mongo loses **replay** and **fan-out**; Kafka is the **log**.” |
 
 ### 8.1 Product tradeoffs
 
@@ -412,6 +387,17 @@ sequenceDiagram
 
 ## 9. Monitoring, observability, and security
 
+<a id="say-voice-9"></a>
+#### Human interaction (monitoring, observability & security)
+
+**Habit:** *“Prove the story with traces and a few SLIs.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Traces** | “Span per **GET PDP** and per **event batch** accept.” |
+| **Dashboards** | “**Lag**, **duplicate rate**, **p99 PDP**, Redis memory.” |
+| **Security** | “**Rate limit** `/events` and PLP; **no secrets** in URLs; scrub **PII** in logs.” |
+
 **SLIs / SLOs:** PDP **p99**, PLP **p99**, **Kafka consumer lag**, **duplicate event rate**, null `product_id` rate, **search** latency.
 
 **Tracing:** span per `GET /products/{id}` and per **event batch** accept path.
@@ -423,6 +409,8 @@ sequenceDiagram
 ---
 
 ## 10. Design patterns, data structures & best practices
+
+Uber **HLD** rewards tying **patterns** to **boxes** on the board—not a laundry list.
 
 ### 10.1 Distributed / architectural patterns
 
@@ -472,28 +460,48 @@ sequenceDiagram
 | Big vs small aggregation windows | Smooth vs responsive |
 | Strong sync trending | Correctness vs **latency** |
 
+<a id="say-voice-10"></a>
+#### Human interaction (design patterns, data structures & best practices)
+
+**Habit:** *“One pattern per hop—**event log**, **CQRS-lite**, **cache-aside**, **idempotent consumer**.”*
+
+| You mean… | Say it like this in the room |
+|-----------|-------------------------------|
+| **Distributed** | “**Kafka** = replay + fan-out; **CQRS-lite** = fat read model vs OLTP orders; **cache-aside** PDP; **breaker** on flaky sinks.” |
+| **DS** | “**ZSET** top-K, **HLL** UV, **inverted index** in OpenSearch, **hash partition** Kafka.” |
+| **Trade** | “More **sync** aggregation = fresher, worse **tail**; more **async** = calmer reads, **staleness**.” |
+
+---
+
+## Closing notes (where wrap-up human interaction lives)
+
+Endgame is **short** and **conversational**: use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups) and [60-second close](#60-second-close)—not a second full design pass.
+
 ---
 
 ## Bar-raiser follow-ups
 
-**Q: “Why not write events straight to Mongo?”**  
-A: “**Write amplification**, harder **replay**, fewer consumers; Kafka gives **backpressure** and **fan-out** to search/BI/fraud.”
+<a id="say-voice-bar"></a>
+#### Human interaction (bar-raiser)
 
-**Q: “Purchase disagrees with trending?”**  
-A: “**Separate scores** and labels—**bestseller** vs **trending**; purchases **weight** more in combined score if product wants one number.”
+**Habit:** two–four sentences, then **stop**—let them steer.
 
----
-
-## Strong Hire room checklist
-
-- [ ] Spine **1→9** in order  
-- [ ] **Decouple** beacon path from PDP  
-- [ ] **Concrete** Mongo doc + shard rationale  
-- [ ] **At-least-once** + dedupe story  
-- [ ] **CAP** articulated for browse vs money  
+| They ask | Say it like this |
+|----------|------------------|
+| **Why not Mongo for events?** | “**Write amp**, weak **replay**, no **fan-out** to BI/fraud—Kafka is the **unified log**.” |
+| **Purchase vs trending** | “**Separate labels** and pipelines; **bestseller** weights purchases; **trending** can be view-heavy if we **say so**.” |
 
 ---
 
 ## 60-second close
 
-“**Browse** is **cache + document catalog** + **OpenSearch**; **beacons** hit **Kafka**, **Flink-style** jobs roll up to **Redis** and **denormalized** catalog fields. We bias **AP** on read surface with honest **staleness**; **purchase-based** claims tie to **OLTP/lake**, not Redis definitions.”
+<a id="say-voice-close"></a>
+#### Human interaction (60-second close)
+
+**Habit:** one **net-net** pass—stretch or compress to the clock.
+
+| Beat | Say it like this in the room |
+|------|------------------------------|
+| **Recap** | “**Browse** = cache + **document catalog** + **OpenSearch**; **beacons** → **Kafka** → stream agg → **Redis** + denorm fields. **AP** on browse with honest **staleness**; **purchase** claims come from **OLTP/lake**, not Redis **definitions**.” |
+
+---
