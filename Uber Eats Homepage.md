@@ -32,6 +32,7 @@
 - [7. Reliability and failure handling](#7-reliability-and-failure-handling)
 - [8. Tradeoffs and alternatives](#8-tradeoffs-and-alternatives)
 - [9. Monitoring, observability, and security](#9-monitoring-observability-and-security)
+- [10. Design patterns, data structures & best practices](#10-design-patterns-data-structures--best-practices)
 
 **Wrap-up**
 
@@ -695,6 +696,67 @@ sequenceDiagram
 
 - **Regional** data residency for PII and logs if required.  
 - **Merchant** and **consumer** data separation in logs and traces (**no secrets** in query strings).
+
+---
+
+## 10. Design patterns, data structures & best practices
+
+Uber **HLD** rewards **distributed-systems** thinking; classic **GoF** still appears as **service-level** roles. Say **where** each pattern lives and **why**—not a pattern laundry list.
+
+### 10.1 Architectural / distributed patterns (primary)
+
+| Pattern | Where in this design | One-line “why” |
+|---------|----------------------|----------------|
+| **API Gateway / Facade** | Edge entry to homepage | Single policy surface: auth, rate limits, routing |
+| **BFF (Backend for Frontend)** | Homepage assembly | Shape payload per client; isolate churn from core services |
+| **Strategy** | Pluggable **rankers**, mixer rules, geo backends | A/B and product rules without rewriting the pipeline |
+| **Template method** (conceptual) | Pipeline: locate → geo → filter → rank → assemble | Fixed skeleton; swap steps under flags |
+| **Circuit breaker** | Ranker, feature store, flaky deps | Fail fast; trigger **fallback** ordering |
+| **Bulkhead** | Thread pools / conn pools per dependency | One slow dep does not exhaust the whole service |
+| **Cache-aside** | Redis / CDN for lists and fragments | Read path owns population + TTL |
+| **CQRS-lite** | Orders **write** OLTP vs **read** aggregates / home rails | Different models for different access patterns |
+| **Event-driven** | Kafka → OLAP / denormalized scores | Decouple metrics and training from synchronous home path |
+| **Saga** (if extended) | Checkout spanning services | **Not** homepage core—mention for handoff to order service |
+| **Rate limiting / Throttling** | Gateway + hot endpoints | Protect ranker and spatial index |
+| **Idempotency keys** | Client retries on home mutations (if any) | Safe retries without duplicate side effects |
+
+### 10.2 Classic OO patterns (when interviewer says “LLD inside a service”)
+
+| Pattern | Map to homepage | Notes |
+|---------|-----------------|-------|
+| **State** | Restaurant **lifecycle** (open/paused) or request handling | Often a **rules engine**, not a giant enum switch in prod |
+| **Chain of responsibility** | Middleware: auth → geo → rate limit | Request pipeline filters |
+| **Observer** | Impression events → async consumers | **Not** blocking the read path |
+| **Command** | “Refresh rail” admin ops | Auditable actions |
+
+### 10.3 Data structures & storage choices (say in interview)
+
+| Concern | Typical structure / store | Why |
+|---------|----------------------------|-----|
+| Spatial index | **Geohash / H3** cell → set or sorted set of ids | Neighbor query + cap |
+| Candidate set before rank | **Bounded list** or **min-heap** for top-K by cheap score | Control CPU |
+| Rank scores online | **Float vector** + weights or **sparse** feature map | Model-dependent |
+| Hot rails | **Redis** string/sorted-set with **TTL** | Speed |
+| Catalog | **SQL rows** + optional **JSON** / **document** for menu | Flex vs reporting |
+| Search | **Inverted index** (OpenSearch) | Text + facets |
+| Metrics | **Columnar** / OLAP fact tables | Scans over orders |
+
+### 10.4 Best practices (Strong Hire bar)
+
+- **Separate invariants:** eligibility correctness vs ranking best-effort.  
+- **Time-box** expensive stages; **measure** fallback rate.  
+- **Define metrics** from **facts**, cache only accelerates.  
+- **Single-flight / jitter** on popular cache keys.  
+- **Feature flags** for rank and section toggles with **kill switch**.
+
+### 10.5 Pattern-level trade-offs (say aloud)
+
+| Pick | Gain | Cost |
+|------|------|------|
+| More **sync** calls to ranker | Fresher scores | **p99** tail |
+| More **precompute** | Stable latency | Staleness; **pipeline** complexity |
+| **Fat BFF** | Velocity | **Blast radius**—split when team scales |
+| **Strong cache** on eligibility | Speed | Risk if invalidation wrong—keep **short TTL** |
 
 ---
 
