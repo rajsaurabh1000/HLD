@@ -1,163 +1,37 @@
 # HLD — Social Network News Feed
 
-> **GitHub README style** — pair with [HLD-README.md](./HLD-README.md).
-
-| | |
-|--|--|
-| **Round** | 45–60 min |
-| **Strong-hire hooks** | **Hybrid fan-out**, **celebrity path**, **ranking timeout + mixer**, **live update** without full refetch |
-
----
-
-## Table of contents
-
-**Prep**
-
-- [Interview plan](#interview-plan)
-- [SDE-2 drive kit (Senior interviewer)](#sde-2-drive-kit-senior-interviewer)
-- [Strong-hire signals](#strong-hire-signals)
-- [Coverage map](#coverage-map)
-
-**Interview spine (nine steps)**
-
-- [Interview spine (nine steps)](#interview-spine-nine-steps)
-- [1. Clarify requirements](#1-clarify-requirements)
-- [2. Estimate scale](#2-estimate-scale)
-- [3. APIs and data model](#3-apis-and-data-model)
-- [4. High-level architecture](#4-high-level-architecture)
-- [5. Deep dive: read feed path](#5-deep-dive-read-feed-path)
-- [6. Scaling and bottlenecks](#6-scaling-and-bottlenecks)
-- [7. Reliability and failure handling](#7-reliability-and-failure-handling)
-- [8. Tradeoffs and alternatives](#8-tradeoffs-and-alternatives)
-- [9. Monitoring, observability, and security](#9-monitoring-observability-and-security)
-- [10. Design patterns, data structures & best practices](#10-design-patterns-data-structures--best-practices)
-
-**Wrap-up**
-
-- [Bar-raiser follow-ups](#bar-raiser-follow-ups)
-- [Strong Hire room checklist](#strong-hire-room-checklist)
-- [60-second close](#60-second-close)
-
----
-
-## Interview plan
-
-> “I’ll clarify **follow graph** vs friends-only, **ranked** vs chronological feed, and freshness. I’ll propose **hybrid fan-out**: **push** timeline ids for typical users, **pull/merge** for celebrities. I’ll put **APIs + graph/post/timeline model** on the board, sketch architecture, then deep dive **read path**: ids → hydrate → **time-boxed rank** → return. Stop me for **write fan-out** or **ranking**.”
-
----
-
-## SDE-2 drive kit (Senior interviewer)
-
-### A. Lock the agenda
-
-Clarify → scale → graph/post/timeline model → architecture → **read path** (ids, hydrate, rank) → **write fan-out** if asked → celebrity → failures → tradeoffs → monitoring/security. **Pause:** “Ranked feed vs **mostly chrono**?”
-
-### B. Questions — **this order**
-
-| # | Ask |
-|---|-----|
-| 1 | “**Ranked** home vs strict reverse chrono?” |
-| 2 | “Threshold: followers count where we **stop pushing**?” |
-| 3 | “**Edit/delete** post—invalidate how?” |
-| 4 | “**Ads** / injected promos in mixer?” |
-| 5 | “**Blocks/mutes**—hard filter everywhere?” |
-| 6 | “Live: **WS** nudge vs poll?” |
-
-**Mirror:** “So timeline stores **ids**, bodies hydrated separately.”
-
-### C. Winning line per spine
-
-| Step | Sentence |
-|------|----------|
-| 1 | “**Hybrid fan-out**: push for normals, **pull/merge cap** for celebs.” |
-| 2 | “Reads ≫ writes; **celebrity** is the write amplification trap.” |
-| 3 | “Graph shard; posts metadata; **timeline list of ids**.” |
-| 4 | “Post→**async fan-out worker**→timelines.” |
-| 5 | “GET feed: ids → **batch hydrate** → **time-box rank + mixer**.” |
-| 6 | “Fan-out queue depth; **hot timeline** key.” |
-| 7 | “Ranker timeout → **chrono** fallback; partial feed policy.” |
-| 8 | “More push vs pull; ranking complexity.” |
-| 9 | “fan-out **lag**, feed **p99**; authZ; blocklist **version**.” |
-
-### D. Whiteboard order
-
-1. Post service + **Fan-out** + **Timeline store**.  
-2. **Read path** sequence.  
-3. **Celebrity** branch: “**merge capped** slice.”
-
-### E. Senior probes
-
-| Probe | Answer |
-|-------|--------|
-| “Celebrity post?” | “**No** O(followers) push; **read-time merge** from author shard with **cap**.” |
-| “Consistency graph→feed?” | “Often **eventual** seconds; blocks should be **fast**; optional read tokens.” |
-
-### F. Time crunched
-
-**Hybrid fan-out** + **read path with rank timeout**.
-
-### G. Anti-patterns
-
-- Pushing celeb post to **100M** timelines.  
-- Fat timelines storing **full post JSON**.  
-- Ranker with **no fallback** under SLO pressure.
-
----
-
-## Strong-hire signals
-
-- **Celebrity** mitigation **without** being asked.  
-- **Timeline = ids**, hydrate separately.  
-- **Ranking fallback** on timeout.  
-- **Live** = **cursor** nudge, not full feed over WS.
-
----
-
-## Coverage map
-
-- [ ] [Nine-step spine](#interview-spine-nine-steps)  
-- [ ] Compose + distribute  
-- [ ] Push / pull / **hybrid**  
-- [ ] Ranking + mixer + ads  
-- [ ] Celebrity / viral  
-- [ ] Graph + post + timeline stores  
-- [ ] Cache invalidation  
-- [ ] Live updates  
-- [ ] Blocks / mutes  
-
----
-
-## Interview spine (nine steps)
-
-| Step | What you deliver | Section |
-|------|------------------|---------|
-| **1** | Clarify requirements | [§1](#1-clarify-requirements) |
-| **2** | Estimate scale | [§2](#2-estimate-scale) |
-| **3** | APIs / data model | [§3](#3-apis-and-data-model) |
-| **4** | High-level architecture | [§4](#4-high-level-architecture) |
-| **5** | Deep dive critical flow | [§5](#5-deep-dive-read-feed-path) |
-| **6** | Scaling / bottlenecks | [§6](#6-scaling-and-bottlenecks) |
-| **7** | Reliability / failure handling | [§7](#7-reliability-and-failure-handling) |
-| **8** | Tradeoffs / alternatives | [§8](#8-tradeoffs-and-alternatives) |
-| **9** | Monitoring / security | [§9](#9-monitoring-observability-and-security) |
-
----
+<a id="interview-spine-nine-steps"></a>
 
 ## 1. Clarify requirements
 
-### 1.1 Questions to ask first
+<a id="say-1-questions-human"></a>
+### 1.1 Clarify 
 
-| Question | Why it matters |
-|----------|----------------|
-| **Ranked** vs strict reverse-chronological? | Ranker complexity |
-| Max followers for “normal” vs **celebrity** threshold? | Hybrid fan-out |
-| **Edit/delete** post semantics? | Invalidation |
-| **Ads** / injected prompts in feed? | Mixer |
-| **Media** types and size limits? | CDN, storage |
-| **Blocks/mutes**—hard filter everywhere? | Invariant |
-| **Multi-region**? | Replication, read routing |
+| Topic | Say it like this in the room |
+|--------------------------|-------------------------------|
+| **Feed shape** | “**Ranked** home vs mostly **reverse chrono**?” |
+| **Celebrity** | “At what follower count do we **stop pushing** and switch to **read-time merge**?” |
+| **Lifecycle** | “**Edit/delete** post—how hard must invalidation be?” |
+| **Mixer** | “**Ads** or injected promos in scope?” |
+| **Safety** | “**Blocks/mutes**—server-side **hard filter** everywhere?” |
+| **Live** | “**WS/SSE nudge** vs polling for freshness?” |
+| **Region** | “**Multi-region** from day one?” |
 
-### 1.2 Functional requirements (FR)
+**Micro-pauses:** *“So timelines store **ids**; bodies **hydrate** separately; celebs don’t get **O(followers)** push.”*
+
+### 1.2 Functional requirements (FR) — after alignment, say this as “what we must build”
+
+<a id="say-fr-human"></a>
+#### Human interaction (FR — how to explain after alignment)
+
+**Habit:** *“**Graph**, **post**, **distribute**, **read**.”*
+
+| FR area | Say it like this in the room |
+|---------|-------------------------------|
+| **Graph** | “**Follow** / unfollow; optional friends-only.” |
+| **Post** | “Create post; **fan-out policy** depends on author size—**hybrid**.” |
+| **Feed** | “**Home feed** paginated; ranked vs chrono per product.” |
+| **Safety** | “**Blocks/mutes** enforced on **read path**.” |
 
 **Social graph**
 
@@ -179,7 +53,19 @@ Clarify → scale → graph/post/timeline model → architecture → **read path
 
 - **Block/mute** must filter **hard** from feed inputs.
 
-### 1.3 Non-functional requirements (NFR)
+### 1.3 Non-functional requirements (NFR) — say as “how it must behave”
+
+<a id="say-nfr-human"></a>
+#### Human interaction (NFR — how to say “how it must behave”)
+
+**Habit:** *“**Reads ≫ writes**; **rank** gets a **deadline**.”*
+
+| NFR area | Say it like this in the room |
+|----------|-------------------------------|
+| **Latency** | “**Low p99** on **GET /feed**—I’ll **time-box** ranking.” |
+| **Availability** | “**Partial feed** or **chrono fallback** beats a blank **500**.” |
+| **Consistency** | “Graph can be **eventual** for seconds; **blocks** should feel **fast**.” |
+| **Security** | “**AuthZ** everywhere; **signed** media URLs.” |
 
 **Scale**
 
@@ -205,13 +91,32 @@ Clarify → scale → graph/post/timeline model → architecture → **read path
 
 - **AuthZ** on all reads; **no IDOR** on private posts; **signed URLs** for media.
 
-### 1.4 Invariant
+### 1.4 Invariants (one sentence you repeat under pressure)
 
 **Invariant:** “**Blocks/mutes** are **hard filters** on candidate ids; a feed response **version** does not contain **duplicate** post ids.”
+
+<a id="say-voice-1"></a>
+
+**Purpose:** handoff → **hybrid fan-out** + **read funnel**.
+
+| Beat | Say it like this |
+|------|------------------|
+| **Bridge** | “**Push ids** for normals; **pull/merge with cap** for celebrities—never **O(followers)** push for celebs.” |
+| **Read path** | “**Ids → hydrate → rank under deadline → mixer**.” |
 
 ---
 
 ## 2. Estimate scale
+
+<a id="say-voice-2"></a>
+#### Human interaction (estimate scale)
+
+**Habit:** *“**DAU** big; **celebrity** is the write trap.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Read:write** | “Reads dominate—optimize **timeline read** and **rank tail**.” |
+| **Celebrity** | “One post could be **100M+** followers—**hybrid** is non-optional.” |
 
 | Dimension | Illustrative |
 |-----------|----------------|
@@ -220,9 +125,21 @@ Clarify → scale → graph/post/timeline model → architecture → **read path
 | Celebrity | Single post **fan-out** could be **100M+** if naively pushed—**forbidden** path |
 | Timeline size | **Trim** to last N thousand ids per user (product) |
 
+**Tie it in one line:** “**Materialized timelines of ids** + **async fan-out** for normals; **capped merge** for celebs.”
+
 ---
 
 ## 3. APIs and data model
+
+<a id="say-voice-3"></a>
+#### Human interaction (APIs & data model)
+
+**Habit:** *“**Graph**, **post**, **timeline ids**—three stores.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Model** | “**Timeline** holds **post ids** only; **post service** holds metadata; **graph** owns follows.” |
+| **Hybrid** | “Normals get **pushed ids**; celebs **merge at read** from author shard with a **cap**.” |
 
 ### 3.1 APIs (sketch)
 
@@ -254,6 +171,16 @@ Clarify → scale → graph/post/timeline model → architecture → **read path
 
 ## 4. High-level architecture
 
+<a id="say-voice-4"></a>
+#### Human interaction (high-level architecture / HLD)
+
+**Habit:** *“**Write**: post → fan-out → timelines; **Read**: ranker hits timelines + post store.”*
+
+| Moment | Say it like this in the room |
+|--------|------------------------------|
+| **Write** | “**Post service** writes metadata; **fan-out worker** fans ids into follower timelines for **non-celeb**.” |
+| **Read** | “**Feed ranker**: pull **candidate ids**, **batch hydrate**, **rank + mixer**.” |
+
 ```mermaid
 flowchart TB
   Cl[Client]
@@ -277,6 +204,20 @@ flowchart TB
 ---
 
 ## 5. Deep dive: read feed path
+
+<a id="say-voice-5"></a>
+#### Human interaction (deep dive — critical flow)
+
+**Habit:** *“**GET /feed** like the sequence diagram—**deadline** on rank.”*
+
+| Step | Say it like this in the room |
+|------|-------------------------------|
+| **Fetch** | “Pull **timeline candidate ids**; **merge** capped celeb sources.” |
+| **Hydrate** | “**Batch** post metadata; enforce **blocks** server-side.” |
+| **Rank** | “**Time-box** model; on timeout → **chrono** fallback; **mixer** for ads if any.” |
+| **Live** | “**WS/SSE** nudges new **`cursor`**—don’t push full ranked page every tick.” |
+
+This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
 
 ```mermaid
 sequenceDiagram
@@ -316,6 +257,17 @@ sequenceDiagram
 
 ## 6. Scaling and bottlenecks
 
+<a id="say-voice-6"></a>
+#### Human interaction (scaling & bottlenecks)
+
+**Habit:** *“**Fan-out queue**, **hot timeline**, **rank tail**.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Fan-out** | “Watch **queue depth**; **batch** inserts; scale workers.” |
+| **Hot timeline** | “**Shard** timeline rows; **rate limit** follow bursts.” |
+| **Rank** | “**Timeout + fallback**; shed **mixer** first.” |
+
 | Risk | Mitigation |
 |------|------------|
 | **Fan-out backlog** | Queue depth monitoring; scale workers; **batch** inserts |
@@ -329,6 +281,16 @@ sequenceDiagram
 
 ## 7. Reliability and failure handling
 
+<a id="say-voice-7"></a>
+#### Human interaction (reliability & failure handling)
+
+**Habit:** *“**Partial success**; **idempotent fan-out**.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Shard fail** | “Return **partial feed** if product allows.” |
+| **Fan-out** | “**Dedupe** `(post_id, follower_id)` on insert; **replay** from log in disaster.” |
+
 - **Partial feed:** return available sections if one shard fails (product-dependent).  
 - **Idempotent fan-out:** dedupe on `(post_id, follower_id)` insert.  
 - **Replay:** rebuild timeline from log in disaster (batch job).  
@@ -337,6 +299,16 @@ sequenceDiagram
 ---
 
 ## 8. Tradeoffs and alternatives
+
+<a id="say-voice-8"></a>
+#### Human interaction (tradeoffs & alternatives)
+
+**Habit:** *“**Push vs pull**—storage vs write/read complexity.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Hybrid** | “**Push** makes reads cheap for normals; **celebs** break push at scale.” |
+| **Rank** | “Heavy rank = engagement vs **p99** tail.” |
 
 ### 8.1 Core tradeoffs
 
@@ -358,6 +330,16 @@ sequenceDiagram
 
 ## 9. Monitoring, observability, and security
 
+<a id="say-voice-9"></a>
+#### Human interaction (monitoring, observability & security)
+
+**Habit:** *“**Fan-out lag** and **feed p99** are the headline SLIs.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Metrics** | “**Lag** until **p%** of followers have id; **fallback** rate; **empty feed**.” |
+| **Security** | “**Private** posts; **blocks**; **rate limits**; **signed** media.” |
+
 **Metrics:** fan-out **lag** (post → **p%** followers have id), feed **p99**, rank **fallback** rate, **empty feed** rate.
 
 **Tracing:** `GET /feed` spans for timeline fetch, hydrate, rank.
@@ -369,6 +351,8 @@ sequenceDiagram
 ---
 
 ## 10. Design patterns, data structures & best practices
+
+Tie **hybrid fan-out**, **CQRS/materialized view**, **cache-aside**, **timeout+fallback** to boxes.
 
 ### 10.1 Feed / distributed patterns
 
@@ -412,28 +396,47 @@ sequenceDiagram
 | Push fan-out | Read cheap vs **write** cost + fan-out lag |
 | Pull at read | Write cheap vs **read** latency for heavy consumers |
 
+<a id="say-voice-10"></a>
+#### Human interaction (design patterns, data structures & best practices)
+
+**Habit:** *“**Hybrid fan-out**, **materialized timeline**, **Strategy** rankers, **Decorator** mixer.”*
+
+| You mean… | Say it like this in the room |
+|-----------|-------------------------------|
+| **Patterns** | “**Event-driven** fan-out; **CQRS** between post truth and timeline read model; **cache-aside** hot timelines; **bulkhead** rank vs IO.” |
+| **DS** | “Append-only **timeline** lists; **min-heap** merge for celeb pulls; **Bloom** for seen approx.” |
+
+---
+
+## Closing notes (where wrap-up human interaction lives)
+
+Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups) and [60-second close](#60-second-close).
+
 ---
 
 ## Bar-raiser follow-ups
 
-**Q: “Graph vs feed consistency?”**  
-A: “Often **eventual** for seconds; **follow** changes **eventually** prune; optional **read tokens** for stricter reads.”
+<a id="say-voice-bar"></a>
+#### Human interaction (bar-raiser)
 
-**Q: “Global?”**  
-A: “**Regional** timelines + **replicate** graph; optimize **read local**.”
+**Habit:** two–four sentences, then **stop**.
 
----
-
-## Strong Hire room checklist
-
-- [ ] Spine **1→9**  
-- [ ] **Hybrid** fan-out explained  
-- [ ] **Celebrity** path  
-- [ ] **Time-box** rank + fallback  
-- [ ] **Blocks** + security  
+| They ask | Say it like this |
+|----------|------------------|
+| **Graph vs feed** | “Usually **eventual** for seconds; **follow** changes **eventually** prune; optional **read tokens** if stricter.” |
+| **Global** | “**Regional** timelines; **replicate** graph; **read local**.” |
 
 ---
 
 ## 60-second close
 
-“**Hybrid fan-out**: **push ids** for most users, **pull/merge** for **celebrities** with **caps**. **Read path** = timeline ids → **batch hydrate** → **time-boxed rank + mixer**; **live** uses **cursor** nudges. **Storage** splits **graph**, **post metadata**, **timeline lists**, **CDN** for media.”
+<a id="say-voice-close"></a>
+#### Human interaction (60-second close)
+
+**Habit:** one **net-net** pass.
+
+| Beat | Say it like this in the room |
+|------|------------------------------|
+| **Recap** | “**Hybrid fan-out**: **push ids** for normals, **pull/merge cap** for celebs. **Read** = timeline **ids** → **batch hydrate** → **time-boxed rank + mixer**; **live** = **cursor** nudges. **Stores**: **graph**, **posts**, **timelines**, **CDN**.” |
+
+---
