@@ -118,8 +118,9 @@
 1. “**Durability before ACK** (or explicit WAL tradeoff you name).”  
 2. “**Total order per `chat_id`**—not global order across chats.”  
 3. “**At-least-once** fan-out + **idempotent** server + **client dedupe**.”  
-4. “**Shard by `chat_id`**; **hot chat** = rate limit / sub-queue / materialized fan-out.”  
-5. “**Catch-up** via **`after_seq`**—all devices **converge**.”
+4. “**Shard by `chat_id`**; **hot chat** = **partition skew** or **fan-out queue backlog** first—**materialized inbox** only if that is the proven bottleneck.”  
+5. “**Catch-up** via **`after_seq`**—all devices **converge**.”  
+6. “**User journey** (say once)—[type → send → gateway → persist → ACK → fan-out → offline catch-up](#user-journey-framing); **write** = durability + order, **read** = convergence.”
 
 <a id="say-voice-1"></a>
 
@@ -128,7 +129,7 @@
 | Beat | Say it like this |
 |------|------------------|
 | **Bridge** | “**Effectively-once**: **at-least-once** transport + **idempotent** insert on `client_msg_id` + UI dedupe on **`server_seq`**.” |
-| **Hot chat** | “Fan-out is **partitioned** by **`chat_id`**—I’ll rate-limit or **materialize** if the room pushes me there.” |
+| **Hot chat** | “**Queue-based fan-out** first; **materialized inbox** only if **hot chat** or **fan-out cost** becomes the bottleneck.” |
 
 ---
 
@@ -144,14 +145,14 @@
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
 | **Shard** | “Writes and storage keyed by **`chat_id`**.” |
-| **Hot chat** | “Viral thread ⇒ **partition tail**, **sub-queue**, or **materialized fan-out**.” |
+| **Hot chat** | “Viral thread ⇒ **partition skew** or **fan-out queue backlog** first—**materialized inbox** only if metrics prove we need it.” |
 | **Read path** | “History pulls plus live—**catch-up** must be **keyset** by seq.” |
 
 | Dimension | Illustrative |
 |-----------|----------------|
 | Messages/day | **Billions** at WhatsApp scale (tune down if interviewer wants) |
 | Shard key | **`chat_id`** for writes and storage |
-| Hot chat | World Cup / viral → **rate limit**, **sub-queue**, or **materialized fan-out** |
+| Hot chat | World Cup / viral → **rate limit**, **sub-queue**, then **materialized inbox** only if **queue** path breaks |
 | Read:write | History pulls + live mix |
 
 **Tie it in one line:** “**Partition by chat**; optimize **send + catch-up**; plan for **hot partition** explicitly.”
@@ -190,6 +191,24 @@
 
 ---
 
+## 👤 User journey (say once early)
+
+<a id="user-journey-framing"></a>
+
+**Say it once early** (near the [architecture diagram](#4-high-level-architecture)):
+
+*“I think of this from **user** perspective:
+
+User **types** a message → **hits send** → message goes to **gateway** → gets **persisted** → **ACK** comes back → then **fan-out** delivers to recipients → if **offline**, they **catch up** via **`after_seq`**.
+
+So:
+- **write path** ensures **durability** + **ordering**  
+- **read path** ensures **convergence** across devices.”*
+
+👉 One pass—**intuitive**, easy to map to **persist → seq → queue → push** on the board.
+
+---
+
 ## 4. High-level architecture
 
 <a id="say-voice-4"></a>
@@ -200,6 +219,7 @@
 | Moment | Say it like this in the room |
 |--------|------------------------------|
 | **Path** | “Client → **LB** → **WS gateway** → **chat service** → **DB** by **`chat_id`**.” |
+| **User journey** | “Same story as [👤 User journey](#user-journey-framing): **send → persist → ACK → fan-out**; offline **`after_seq`**.” |
 | **Fan-out** | “After commit, enqueue **deliver_to_recipients**; queue pushes back to **gateways**.” |
 | **Registry** | “**Redis** maps user → gateway for the right **push** box.” |
 | **Steer** | “**Deeper** on **persist/ACK**, **fan-out queue**, or **reconnect + replay** next?” |
@@ -231,7 +251,7 @@ flowchart TB
 |-------|------|-----|
 | **1 — MVP** | **Single-region**, **WS + REST catch-up**, **idempotent** send, **simple** fan-out queue | Prove ordering + dedupe story |
 | **2 — Growth** | **Registry**, **hot-chat** limits, **media** pre-signed path, **DLQ** hygiene | Reliability at scale |
-| **3 — Scale** | **Partitioned** fan-out, optional **materialized inbox**, **multi-region** **leader per chat** | Tail + DR |
+| **3 — Scale** | **Partitioned** queue fan-out; **materialized inbox** only if **hot chat** or **fan-out cost** forces it; **multi-region** **leader per chat** | Tail + DR |
 
 **Taking a stance:** *“I’d default **commit-then-ACK** with **at-least-once** delivery and **explicit** client dedupe—**exactly-once** is a **product illusion**, not a wire guarantee.”*
 
@@ -249,12 +269,26 @@ flowchart TB
 | **Persist** | “**Idempotent** insert on **`client_msg_id`**; allocate **`server_seq`**.” |
 | **ACK** | “Return **ACK** only after **durable** commit (or say WAL explicitly).” |
 | **Deliver** | “Enqueue fan-out; **at-least-once** to gateways—clients **dedupe**.” |
-| **Anchor** | “First metrics: **send p99**, queue **depth**, **duplicate** rate.” |
+| **Anchor** | “Say **once**—[🎯 Bottleneck Anchor](#bottleneck-anchor-once).” |
 | **Production voice** | “**GW crash** mid-send—client **retries** same **`client_msg_id`**; **queue backlog**—**shed typing**; **split brain** writer—**fencing** token if they push multi-region.” |
 
 This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
 
-**Taking a stance:** *“I’d **shard by `chat_id`**, **sticky** routing to a pool of gateways, and **internal queue** for fan-out—**materialized per-user inbox** only if **hot chat** or **fan-out cost** forces it.”*
+<a id="bottleneck-anchor-once"></a>
+### 🎯 Bottleneck Anchor
+
+**Say once in the deep dive:**
+
+The main bottleneck here is:
+
+- **hot chat** causing **partition skew**  
+- **or** **fan-out queue backlog**
+
+*That’s what I’d **monitor first**.*
+
+👉 **Prioritization**—then **send p99**, **duplicate rate**, and **GW disconnects** as supporting proof.
+
+**Taking a stance:** *“**I’d start with queue-based fan-out** to online gateways (partitioned by **`chat_id`**), **sticky** pools, **idempotent** persist + **ACK after durable commit**—and **only move to a materialized per-user inbox** if **hot chat** or **fan-out cost** becomes the **bottleneck**.”*
 
 ### 5.1 Send message (sequence)
 
@@ -300,13 +334,13 @@ sequenceDiagram
 
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
-| **Hot chat** | “**Rate limit**, internal **sub-queue**, or **materialized inbox**.” |
+| **Hot chat** | “**Rate limit** + **sub-queue** on **queue fan-out** first; **materialized inbox** only when that path is **still** the bottleneck.” |
 | **Gateways** | “**Horizontal** replicas; **connection** limits per box.” |
 | **Queue** | “Scale consumers; **shed typing** before messages.” |
 
 | Risk | Mitigation |
 |------|------------|
-| **Hot chat** partition | Rate limit; internal sharding of fan-out; **materialized inbox** for huge groups |
+| **Hot chat** partition | Rate limit; internal sharding of fan-out; **materialized inbox** only if **queue backlog** / cost still unacceptable |
 | **Gateway** connection limit | Many nodes; **DRY** connection routing |
 | Queue backlog | Scale consumers; **shed** typing |
 | Storage size | **Tiering** cold chats to cheaper store; compaction |
@@ -350,7 +384,7 @@ sequenceDiagram
 | **Ordering** | “Strong per-chat order is simple; cost is **hot shard**.” |
 | **Inbox** | “Materialize per-user inbox—**fast read home**, **write amplification**.” |
 | **My default (ordering)** | “**Server seq per chat** + **client_msg_id** dedupe—simple story under pressure.” |
-| **My default (fan-out)** | “**Queue push** to online gateways first; **inbox materialization** if **hot chat** breaks the model.” |
+| **My default (fan-out)** | “**Queue-based fan-out** first; **materialized inbox** only when **hot chat** or **fan-out cost** proves the queue model isn’t enough.” |
 
 | Choice | Upside | Downside |
 |--------|--------|----------|
@@ -454,7 +488,7 @@ Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Co
 |--------------------|---------------------------|
 | **Name ACK semantics** clearly | “We’re durable” with no commit point |
 | **Checkpoint** after diagram | One monologue through WS details |
-| **Default + caveat** on inbox vs queue | Listing every transport |
+| **Default + caveat** (queue fan-out first; materialized inbox if bottleneck) | Listing every transport |
 | **Invite** hot-chat depth | Assuming groups are always small |
 | **Time-box** | Reading the whole doc aloud |
 
@@ -485,6 +519,6 @@ Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Co
 
 | Beat | Say it like this in the room |
 |------|------------------------------|
-| **Recap** | “**WS gateways** + **registry**; **durable** write then **`server_seq`**; **ACK**; **queue fan-out**; **at-least-once** + **`client_msg_id`** dedupe; **catch-up** by seq; **hot chat** = partition + limits + maybe **materialized fan-out**.” |
+| **Recap** | “**WS gateways** + **registry**; **durable** write then **`server_seq`**; **ACK**; **queue-based fan-out** first; **at-least-once** + **`client_msg_id`** dedupe; **catch-up** by **`after_seq`**; **hot chat** → **skew** or **queue backlog** first—**materialized inbox** only if that’s the bottleneck.” |
 
 ---
