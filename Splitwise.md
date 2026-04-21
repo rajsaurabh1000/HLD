@@ -30,6 +30,7 @@
 - [7. Reliability and failure handling](#7-reliability-and-failure-handling)
 - [8. Tradeoffs and alternatives](#8-tradeoffs-and-alternatives)
 - [9. Monitoring, observability, and security](#9-monitoring-observability-and-security)
+- [10. Design patterns, data structures & best practices](#10-design-patterns-data-structures--best-practices)
 
 **Wrap-up**
 
@@ -367,6 +368,52 @@ sequenceDiagram
 **Security:** strict **group ACL**; no **IDOR** on `group_id`; audit log for money-like events; **encrypt at rest**; **TLS** in transit.
 
 **Compliance:** export/delete user data per regulation; retention policy on **comments** vs **expenses**.
+
+---
+
+## 10. Design patterns, data structures & best practices
+
+### 10.1 Distributed / transactional patterns
+
+| Pattern | Where | Why |
+|---------|--------|-----|
+| **Ledger + projection** | Expenses immutable; balances derived | Audit + rebuild; **event sourcing**-like without naming it if uncomfortable |
+| **Unit of Work / Transaction** | Single **DB transaction** per expense post | Atomic splits + balance bump |
+| **Optimistic concurrency** | `version` on projection row | Hot group without long locks |
+| **Pessimistic lock** | `SELECT … FOR UPDATE` on group | Simpler mental model; watch **contention** |
+| **Outbox** | After commit publish `ExpenseCreated` | Reliable side effects |
+| **Idempotency key** | `POST /expenses` | Double-submit safe |
+| **Saga** | Rare for single service; **multi-service** settlement extension | Compensating transactions if money movement splits |
+
+### 10.2 Classic patterns
+
+| Pattern | Map |
+|---------|-----|
+| **Aggregate** (DDD) | **Group** as consistency boundary |
+| **Value object** | Money in **integer cents** + currency |
+| **State machine** | Expense lifecycle: pending → posted → voided |
+| **Strategy** | Different **split calculators** (equal / percent / exact) |
+
+### 10.3 Data structures
+
+| Need | Structure |
+|------|-----------|
+| Net balances | **Map** userId → cents; or **projection row** per member |
+| Settlement greedy | **Two heaps** or sort debtors/creditors arrays |
+| Activity feed | **Keyset**-paginated list by `(created_at, id)` |
+
+### 10.4 Best practices
+
+- **Never** silent rewrite of posted money events.  
+- **Integer** currency; explicit **rounding** policy.  
+- **Shard** by `group_id` for write locality.
+
+### 10.5 Trade-offs
+
+| Pick | Trade |
+|------|--------|
+| Sync projection | Simple reads vs **write lock** on hot group |
+| Async projector | Write throughput vs **read lag** |
 
 ---
 
