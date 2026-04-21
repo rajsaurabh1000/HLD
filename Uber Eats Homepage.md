@@ -16,6 +16,7 @@
 - [How to drive the round (natural conversation)](#how-to-drive-the-round-natural-conversation)
 - [Key insight (say early)](#key-insight-say-early)
 - [Interview plan (first 60-90 seconds)](#interview-plan-first-60-90-seconds)
+- [SDE-2 drive kit (Senior interviewer)](#sde-2-drive-kit-senior-interviewer)
 - [Strong-hire signals for this problem](#strong-hire-signals-for-this-problem)
 - [Coverage map](#coverage-map)
 
@@ -198,6 +199,89 @@ Default: use the **human opening** in [How to drive the round](#how-to-drive-the
 > “I’ll clarify scope and scale, sketch APIs and storage, draw the read pipeline, then go deep on **geo + ranking + failure modes**—does that work for you?”
 
 **Alignment checkpoint** (after architecture sketch): “Before I go deeper on **ranking**, does this match how you’re thinking about scope?”
+
+---
+
+## SDE-2 drive kit (Senior interviewer)
+
+Use this with [How to drive the round](#how-to-drive-the-round-natural-conversation) (tone) + [nine-step spine](#interview-spine-nine-steps) (structure). **Paraphrase**; do not sound like a script.
+
+### A. Lock the room in 30 seconds
+
+1. Say your **plan** (clarify → scale → model → diagram → **read path deep dive** → scale/failures → monitoring).  
+2. **Stop talking**: “Does that sequencing work—and is there anywhere you want **extra** depth?”  
+3. If they say “ranking” or “geo,” mentally **star** that for §5.
+
+### B. Questions to ask — **this order** (skip only if they already answered)
+
+| # | Ask exactly (intent) |
+|---|----------------------|
+| 1 | “What counts as **homepage** for this prompt—nearby only, or also reorder / trending / promos?” |
+| 2 | “For **browsing**, how stale can **trending / popularity** be—seconds, minutes?” |
+| 3 | “What **p99** server latency should I assume for the home payload?” |
+| 4 | “Is **search** in scope or a **separate** service we integrate with?” |
+| 5 | “**Personalization** in v1 or generic rails first?” |
+| 6 | “**Location** sources—GPS, saved address, IP fallback—and any **disclosure** rules?” |
+| 7 | “Any **hard** rules on **open / in-zone / paused** that must never be wrong on the list?” |
+| 8 | “**Multi-region** or single-region mental model?” |
+| 9 | “**Experiments** on ranking—should I reserve a **mixer** slot?” |
+
+**After each answer:** one sentence **“So that means for design I will …”** (forces alignment).
+
+### C. What to explain — **this order** (one winning sentence per beat)
+
+| Spine | Land this sentence (then details only if they nod) |
+|-------|---------------------------------------------------------|
+| 1 | “I separate **eligibility** (who may appear) from **ranking** (order under latency).” |
+| 2 | “This is **read-heavy**; I’ll assume **high RPS** and **tight p99**, so I **cap** work per request.” |
+| 3 | “**APIs** are thin; **orders** stay relational; **menus** are read-shaped documents; **search** is its own index.” |
+| 4 | “Draw a **funnel**: location → geo candidates → filter → rank → assemble.” |
+| 5 | “**Geo** = cell + **neighbors** + **cap**; **rank** = two-stage + **timeout + fallback**; **hydrate** in batch.” |
+| 6 | “Hot risks: **dense cell**, **rank tail**, **stampede**—each has a mitigation.” |
+| 7 | “I **degrade** sections and **time-out** rank before I violate **eligibility** correctness.” |
+| 8 | “Trade **freshness** on browse for **latency**; never trade **wrong in-zone** for speed.” |
+| 9 | “**Metrics** = **order facts → Kafka → OLAP**; Redis is **not** the definition of revenue truth.” |
+
+### D. Whiteboard sequence (reduces “random boxes”)
+
+1. **Client → Gateway → Home service** (one row).  
+2. Under Home: **Location | Geo | Filter | Rank | Assemble** (pipeline).  
+3. Data row: **Spatial | Catalog | Features | Redis | Kafka→OLAP**.  
+4. **One** sequence diagram on **`GET /home`**.  
+5. Only then deep boxes for **rank** or **geo** if pushed.
+
+### E. Senior / Bar Raiser probes — **answer in 2–4 sentences**
+
+| They say / ask | You answer |
+|----------------|------------|
+| “Why not SQL for everything?” | “**Orders** need joins and invariants → SQL. **Menu read shape** is flexible and denormalized → document/JSON or Mongo for velocity; not a dogma.” |
+| “Consistency?” | “**Tiered**: hard **eligibility** stricter; list **ranking** eventual; checkout can be **stronger** than browse if product ties them.” |
+| “Ranking fairness / new stores?” | “**Exploration** slots + cold-start features; monitor **impression share** by tenure; separate **business** constraints from the model.” |
+| “Cache invalidation?” | “**Versioned** keys for catalog; short TTL for **open/closed**; **event** driven for menu; **never** infinite TTL on price.” |
+| “What if ranker is down?” | “**Timeout** then **fallback** order; still respect **eligibility**; monitor **fallback rate**.” |
+| “What if geo index is wrong?” | “**Neighbor expansion** + **max scan**; **cross-check** distance on final shortlist if needed (cost tradeoff).” |
+| “Multi-region?” | “**Regional** reads for catalog/geo; **eventual** global aggregates; avoid **split brain** on writes with clear ownership.” |
+| “Security?” | “**AuthZ** on user data; **rate limits**; minimal **PII** in logs; **signed** URLs for media.” |
+| “How do you test this?” | “Contract tests on **eligibility**; load tests on **geo cap** + rank **deadline**; chaos on ranker timeout.” |
+
+### F. If time is short (pick **two** deep dives only)
+
+Default: **(1) geo + eligibility** and **(2) rank timeout + fallback**. Say: “If we only have time for two deep dives, I’ll do **geo** and **ranking**—cool?”
+
+### G. Staff-level phrases (sprinkle, do not stack)
+
+- “The **latency budget** forces…”  
+- “I’d **time-box** this stage…”  
+- “The **invariant** I’m protecting is…”  
+- “I’d **instrument** fallback rate because…”
+
+### H. Anti-patterns (Senior IC will downgrade)
+
+- Leading with **Redis/Kafka** before **problem shape**.  
+- **No** eligibility vs ranking split.  
+- **No** neighbor cells / cap on geo.  
+- Metrics “from **cache**” as **definition**.  
+- **No** pause for alignment—monologue for 25 minutes.
 
 ---
 
