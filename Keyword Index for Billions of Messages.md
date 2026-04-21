@@ -14,6 +14,8 @@
 
 **Live rule:** **Paraphrase** §1–2 tables; don’t read every row. Go deep **only if they probe**.
 
+**User journey (once):** say the [👤 User journey](#user-journey-framing) line **before** the architecture diagram so the room has a **product** entry point.
+
 <a id="say-1-questions-human"></a>
 ### 1.1 Clarify 
 
@@ -107,7 +109,8 @@
 2. “**Multi-term AND** = **rarest-first** + **`skipTo`** / **galloping**.”  
 3. “**Cap** `max_postings_scan`—bounded work per query.”  
 4. “**Shard** aligns with **authz** boundaries—**no** cross-tenant fan-in.”  
-5. “**Tombstones** + **merge** for deletes/edits; **rebuild** from message log.”
+5. “**Tombstones** + **merge** for deletes/edits; **rebuild** from message log.”  
+6. “**User journey** (say once)—[query → tokenize → dictionary → stream → intersect → top-K](#user-journey-framing); **read** = stream + cap, **write** = async index.”
 
 <a id="say-voice-1"></a>
 
@@ -178,6 +181,22 @@
 
 ---
 
+## 👤 User journey (say once early)
+
+<a id="user-journey-framing"></a>
+
+**Say it once early** (before or right after the [architecture sketch](#4-high-level-architecture)):
+
+*“User **types** a query → system **tokenizes** → looks up terms in the **dictionary** → **streams** postings → **intersects** (if multi-term) → returns **top-K** results.
+
+So:
+- **read path** is **streaming** + **bounded work**  
+- **write path** builds the index **asynchronously** from messages.”*
+
+👉 **Intuitive**, **product-aware**—then map to **writer / segments / query API** on the board.
+
+---
+
 ## 4. High-level architecture
 
 <a id="say-voice-4"></a>
@@ -188,6 +207,7 @@
 | Moment | Say it like this in the room |
 |--------|------------------------------|
 | **Write** | “Tokenize → **posting writer** → **segment files** per shard.” |
+| **User journey** | “Same beat as [👤 User journey](#user-journey-framing): **query → dictionary → iterators → top-K**.” |
 | **Read** | “Dictionary lookup → **iterators** → **merge/intersect**—bounded work.” |
 | **Steer** | “**Deeper** on **intersection**, **compaction**, or **failure/rebuild** next?” |
 
@@ -229,11 +249,25 @@ flowchart LR
 | **Phrase** | “Need **positions**—verify adjacency after AND narrows candidates.” |
 | **Anti-trie** | “Trie helps **prefix completion**; it doesn’t replace **compressed postings** at billions scale.” |
 | **Production voice** | “**Hot term** query—**postings scanned** explodes; **compaction** backlog—**throttle** writes; **corrupt segment**—**checksum** + **rebuild** from log.” |
-| **Anchor** | “First chart: **postings scanned p99**, **merge lag**, **index bytes** per shard.” |
+| **Anchor** | “Say **once**—[🎯 Bottleneck Anchor](#bottleneck-anchor-once).” |
 
 This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
 
-**Taking a stance:** *“I’d default **custom on-disk inverted index** when **cost + tail control** matter; **managed OpenSearch** when **velocity** wins and the room accepts **$$** and less low-level tuning.”*
+<a id="bottleneck-anchor-once"></a>
+### 🎯 Bottleneck Anchor
+
+**Say once in the deep dive:**
+
+The main bottleneck here is **usually**:
+
+- **scanning too many postings** for **hot** terms  
+- **or** **compaction lag** affecting **segment count** / merge depth
+
+*That’s what I’d **monitor first**.*
+
+👉 Then support with **postings scanned p99**, **merge lag**, and **index bytes** per shard.
+
+**Taking a stance:** *“**I’d default to managed search** for most teams, and **move to a custom inverted index** when **cost** or **tail latency** becomes **critical**.”*
 
 ### 5.1 Single keyword
 
@@ -307,13 +341,13 @@ This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar 
 <a id="say-voice-8"></a>
 #### Human interaction (tradeoffs & alternatives)
 
-**Habit:** *“Managed ES vs custom—**velocity vs control**.”*
+**Habit:** *“**Managed search** first; **custom inverted index** when **cost** or **tail p99** forces it.”*
 
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
 | **RAM map** | “Doesn’t scale—same failure mode as naive trie story.” |
-| **Managed** | “OpenSearch/ES ships faster; **cost** and less **low-level** control.” |
-| **My default (engine)** | “**Managed** for most teams; **custom segments** if **p99 + $/query** dominates.” |
+| **Managed** | “**Managed search** (OpenSearch/ES): **velocity**; watch **$** and less **low-level** control.” |
+| **My default (engine)** | “**I’d default to managed search** for most teams, and **move to custom inverted index** when **cost** or **tail latency** becomes **critical**.” |
 | **My default (AND)** | “**Rarest-first** + **`skipTo`** before clever **RAM** structures.” |
 
 | Option | Good | Bad |
@@ -421,7 +455,7 @@ Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Co
 | **Draw iterator** intersection | Explaining Lucene for 20 minutes unprompted |
 | **Cap work** explicitly | “We’ll optimize later” |
 | **AuthZ every shard** | Ignoring tenant isolation |
-| **Default managed vs custom** | Fence-sitting with no pick |
+| **Default** (managed search → custom when cost / tail latency critical) | Fence-sitting with no pick |
 | **Pause for steering** | One long monologue |
 
 **60-minute sketch (flex):** clarify+FR+NFR ~8–12 · scale+APIs ~8–12 · architecture ~8–12 · **deep dive ~15–22** · scale→monitoring ~10–15 · patterns+close ~5–8.
@@ -451,7 +485,7 @@ Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Co
 
 | Beat | Say it like this in the room |
 |------|------------------------------|
-| **Recap** | “**Inverted index** on disk—**sorted compressed postings**; single term **stream** + **pagination**; multi-term **AND** via **rarest-first** + **`skipTo`**; **shard** for **privacy** and scale; **compaction**; monitor **postings scanned** and **p99**.” |
+| **Recap** | “**Inverted index** on disk—**sorted compressed postings**; single term **stream** + **pagination**; multi-term **AND** via **rarest-first** + **`skipTo`**; **shard** for **privacy**; **managed search** default, **custom** if **cost** or **tail** critical; watch **postings scanned**, **compaction**, **p99**.” |
 
 ---
 
