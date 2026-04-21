@@ -1,165 +1,38 @@
 # HLD — Splitwise (Expenses, Balances, Settle-Up)
 
-> **GitHub README style** — pair with [HLD-README.md](./HLD-README.md).
-
-| | |
-|--|--|
-| **Round** | 45–60 min · Staff angles common |
-| **Strong-hire hooks** | **Append-only ledger**, **≤ n−1 settlements**, **per-group serializability**, honest **multi-region** tradeoffs |
-
----
-
-## Table of contents
-
-**Prep**
-
-- [Interview plan](#interview-plan)
-- [SDE-2 drive kit (Senior interviewer)](#sde-2-drive-kit-senior-interviewer)
-- [Strong-hire signals](#strong-hire-signals)
-- [Coverage map](#coverage-map)
-
-**Interview spine (nine steps)**
-
-- [Interview spine (nine steps)](#interview-spine-nine-steps)
-- [1. Clarify requirements](#1-clarify-requirements)
-- [2. Estimate scale](#2-estimate-scale)
-- [3. APIs and data model](#3-apis-and-data-model)
-- [4. High-level architecture](#4-high-level-architecture)
-- [5. Deep dive: critical flow](#5-deep-dive-critical-flow)
-- [6. Scaling and bottlenecks](#6-scaling-and-bottlenecks)
-- [7. Reliability and failure handling](#7-reliability-and-failure-handling)
-- [8. Tradeoffs and alternatives](#8-tradeoffs-and-alternatives)
-- [9. Monitoring, observability, and security](#9-monitoring-observability-and-security)
-- [10. Design patterns, data structures & best practices](#10-design-patterns-data-structures--best-practices)
-
-**Wrap-up**
-
-- [Bar-raiser follow-ups](#bar-raiser-follow-ups)
-- [Strong Hire room checklist](#strong-hire-room-checklist)
-- [60-second close](#60-second-close)
-
----
-
-## Interview plan
-
-> “I’ll clarify currencies, rounding, and permissions, then model **expenses + splits** as an **append-only ledger** and **balances** as **projections**. I’ll cover **settlement simplification** on **net balances**, then **concurrency** with **per-group transactions** or **versioning**. I’ll deep dive **one expense post** end-to-end. Tell me if you want more on **global consistency** or **large groups**.”
-
----
-
-## SDE-2 drive kit (Senior interviewer)
-
-### A. Lock the agenda
-
-Plan: clarify → scale → APIs/schema → architecture → **POST expense transaction** → settlement math → concurrency → failures → tradeoffs → monitoring/security. **Pause:** “Should I bias depth toward **concurrency** or **settlement** or **multi-region**?”
-
-### B. Questions to ask — **this order**
-
-| # | Ask |
-|---|-----|
-| 1 | “Split types: **equal / percent / exact**—any **rounding** rules?” |
-| 2 | “**Delete** vs **void** vs **reversal**—what’s allowed for audit?” |
-| 3 | “**Multi-currency** and FX—who owns rate?” |
-| 4 | “**Who** can post expenses—any roles?” |
-| 5 | “Max **group** size / history length we should assume?” |
-| 6 | “Settlement goal: **min # payments** after netting?” |
-| 7 | “**Multi-region** writes or single-region OK?” |
-
-**Mirror back:** “Got it—so balances must stay **correct under concurrency** and **immutable** history.”
-
-### C. Winning line per spine step
-
-| Step | Sentence |
-|------|----------|
-| 1 | “**Ledger is append-only**; balances are **projections** we can rebuild.” |
-| 2 | “Most groups small; worst case needs **pagination** + **O(1)** balance reads.” |
-| 3 | “**One transaction**: expense + splits + projection bump (+ outbox).” |
-| 4 | “API → SQL **shard by group_id** → optional projector + notify.” |
-| 5 | “Deep dive: **BEGIN → insert splits → update nets → outbox → COMMIT**.” |
-| 6 | “**Hot group** = lock contention; mitigate with **shard + versioning**.” |
-| 7 | “**Idempotency-Key** + unique constraints; projector **lag** surfaced in UX.” |
-| 8 | “Transactional projection vs async projector—**pick** with tradeoffs.” |
-| 9 | “Metrics: **conflict rate**, **p99 POST**, projector **lag**; security: **no IDOR** on groups.” |
-
-### D. Whiteboard order
-
-1. Entities: **Group, Expense, Split, Payment, Projection**.  
-2. **One** sequence on **POST expense**.  
-3. Small diagram: **nets → greedy settle → ≤ n−1**.  
-4. Concurrency: **version** or **row lock** on group—pick one verbally.
-
-### E. Senior probes
-
-| Probe | Answer |
-|-------|--------|
-| “CRDT?” | “Not for arbitrary money splits without strong invariants; **leader per group** or **transaction** simpler.” |
-| “Global low-latency?” | “**Single writer per group** or accept cross-region latency; **don’t** split-brain balances.” |
-| “Rebuild balances?” | “Replay **expenses + payments** from ledger; projection is **cacheable truth** if rebuilt.” |
-
-### F. Time crunched
-
-**POST expense transaction** + **≤ n−1 settlement** only.
-
-### G. Anti-patterns
-
-- Mutable overwrite of expenses.  
-- Recomputing balances from **full scan** every GET at scale.  
-- Hand-wavy “distributed lock everywhere” with no **shard** story.
-
----
-
-## Strong-hire signals
-
-- **Immutable expenses**; corrections as **new rows** / reversals.  
-- **Net balance** from ledger; **materialized** projections with **rebuild** story.  
-- **Settlement** as **≤ n−1** transfers after netting.  
-- **Concurrency:** DB transaction boundaries stated clearly.
-
----
-
-## Coverage map
-
-- [ ] [Nine-step spine](#interview-spine-nine-steps)  
-- [ ] Groups, permissions, multi-currency  
-- [ ] Expense + splits validation (sums, rounding)  
-- [ ] Balances: derived vs stored  
-- [ ] **Settlement** graph algorithm  
-- [ ] Concurrent posts, **lost updates**  
-- [ ] Multi-region / CAP  
-- [ ] Large group history pagination  
-
----
-
-## Interview spine (nine steps)
-
-| Step | What you deliver | Section |
-|------|------------------|---------|
-| **1** | Clarify requirements | [§1](#1-clarify-requirements) |
-| **2** | Estimate scale | [§2](#2-estimate-scale) |
-| **3** | APIs / data model | [§3](#3-apis-and-data-model) |
-| **4** | High-level architecture | [§4](#4-high-level-architecture) |
-| **5** | Deep dive critical flow | [§5](#5-deep-dive-critical-flow) |
-| **6** | Scaling / bottlenecks | [§6](#6-scaling-and-bottlenecks) |
-| **7** | Reliability / failure handling | [§7](#7-reliability-and-failure-handling) |
-| **8** | Tradeoffs / alternatives | [§8](#8-tradeoffs-and-alternatives) |
-| **9** | Monitoring / security | [§9](#9-monitoring-observability-and-security) |
-
----
+<a id="interview-spine-nine-steps"></a>
 
 ## 1. Clarify requirements
 
-### 1.1 Questions to ask first
+<a id="say-1-questions-human"></a>
+### 1.1 Clarify 
 
-| Question | Why it matters |
-|----------|----------------|
-| Equal / percent / exact split? | Validation, rounding rules |
-| Who can add / edit / void expenses? | Authorization model |
-| Multi-currency and FX source? | Schema, settlement |
-| Delete vs **void** / reversal? | Audit trail |
-| Legal export / tax reporting? | Retention, immutability |
-| Max group size / activity feed? | Pagination, hot keys |
-| Settlement objective: **min # payments** vs **min cash moved**? | Algorithm narrative |
+| Topic | Say it like this in the room |
+|--------------------------|-------------------------------|
+| **Split math** | “**Equal / percent / exact**—and what’s the **rounding** rule when it doesn’t divide cleanly?” |
+| **Audit** | “**Delete** vs **void** vs **reversal**—what keeps an **audit-grade** trail?” |
+| **Money** | “**Multi-currency** and FX—who **owns** the rate at post time?” |
+| **Permissions** | “**Who** can post expenses—any **roles** in a group?” |
+| **Scale** | “Max **group** size and history length I should assume for **pagination**?” |
+| **Settlement** | “Goal is **minimum number of payments** after netting, or something else?” |
+| **Region** | “**Multi-region** writes on day one, or **single-region** mental model?” |
 
-### 1.2 Functional requirements (FR)
+**Micro-pauses:** *“So I’ll treat balances as **correct under concurrency** and history as **immutable**.”*
+
+### 1.2 Functional requirements (FR) — after alignment, say this as “what we must build”
+
+<a id="say-fr-human"></a>
+#### Human interaction (FR — how to explain after alignment)
+
+**Habit:** *“Ledger story first—then what the app **shows**.”*
+
+| FR area | Say it like this in the room |
+|---------|-------------------------------|
+| **Groups** | “Create/join **groups**, member list, **who can post**.” |
+| **Expenses** | “**Payer**, amount, splits—**validate** the split sums to the total with your **rounding** rules.” |
+| **Balances** | “Show **per-member net** in a group—optionally **per currency**.” |
+| **Settle** | “Record **payments** and suggest **simplified** transfers—**≤ n−1** after netting.” |
+| **Out of scope** | “**Bank rails** stay out unless you extend—I’m **ledger + UX**.” |
 
 **Groups and membership**
 
@@ -180,7 +53,19 @@ Plan: clarify → scale → APIs/schema → architecture → **POST expense tran
 - Record **payments** between members; suggest **simplified** settlement plan (few transfers).  
 - Activity feed / comments if in scope.
 
-### 1.3 Non-functional requirements (NFR)
+### 1.3 Non-functional requirements (NFR) — say as “how it must behave”
+
+<a id="say-nfr-human"></a>
+#### Human interaction (NFR — how to say “how it must behave”)
+
+**Habit:** *“**Correctness** dominates; everything else is in service of **no silent money bugs**.”*
+
+| NFR area | Say it like this in the room |
+|----------|-------------------------------|
+| **Correctness** | “**No silent corruption** under concurrent posts—**audit** who changed what.” |
+| **Consistency** | “**Per-group** writes are **serializable** in my head—either **one DB transaction** or a very explicit **projector** story.” |
+| **Reads** | “Balance read should be **O(members)** via **projection**, not **O(expenses)** scan.” |
+| **Security** | “**AuthZ** on group; **Idempotency-Key** on POST expense.” |
 
 **Correctness (dominant)**
 
@@ -207,15 +92,35 @@ Plan: clarify → scale → APIs/schema → architecture → **POST expense tran
 - **AuthZ**: only members see group; only allowed roles post.  
 - **Idempotency** on POST expense to prevent double-submit.
 
-### 1.4 Invariant and out-of-scope
+### 1.4 Invariants (one sentence you repeat under pressure)
 
 **Invariant:** “**Posted economic events** are not silently rewritten; **corrections** are explicit **void/reversal** entries.”
+
+<a id="say-voice-1"></a>
+
+**Purpose:** handoff from alignment → **ledger + projection** on the board.
+
+| Beat | Say it like this |
+|------|------------------|
+| **Bridge** | “I’ll keep **append-only** economic facts and treat balances as a **projection** we can **rebuild**.” |
+| **Settlement** | “Net first, then **greedy** match—**≤ n−1** transfers for **n** nonzero balances.” |
 
 **Out of scope (unless asked):** bank integrations, actual money movement rails—focus on **ledger + UX**.
 
 ---
 
 ## 2. Estimate scale
+
+<a id="say-voice-2"></a>
+#### Human interaction (estimate scale)
+
+**Habit:** *“Most groups are small; stress the **hot group** and **history** tails.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Typical** | “**3–20** people, low write QPS—**correctness** tooling matters more than infinite scale.” |
+| **Large trip** | “Thousands of rows → **keyset pagination** and maybe **archive**.” |
+| **Hot group** | “Same group, **many concurrent** posts → **shard by group_id** + **versioning** or locks.” |
 
 | Scenario | Notes |
 |----------|--------|
@@ -226,9 +131,22 @@ Plan: clarify → scale → APIs/schema → architecture → **POST expense tran
 
 **Implication:** optimize **GET balances** via **projection**; avoid **full rescan** of expenses on every read.
 
+**Tie it in one line:** “**O(1)-ish balance reads** via **projection**; **pagination** for history; **per-group** contention is the scaling story.”
+
 ---
 
 ## 3. APIs and data model
+
+<a id="say-voice-3"></a>
+#### Human interaction (APIs & data model)
+
+**Habit:** *“Small API surface; **group_id** is the shard soul.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **APIs** | “**POST** expenses and payments; **GET** balances and suggested settlements; **Idempotency-Key** on expense.” |
+| **Schema** | “**Expense + splits** in one transaction with optional **balance_projection** rows—or async projector if we split.” |
+| **Settlement** | “**Nets** from ledger + payments, then **greedy** pairing—**≤ n−1**.” |
 
 ### 3.1 Public APIs (sketch)
 
@@ -264,6 +182,17 @@ Plan: clarify → scale → APIs/schema → architecture → **POST expense tran
 
 ## 4. High-level architecture
 
+<a id="say-voice-4"></a>
+#### Human interaction (high-level architecture / HLD)
+
+**Habit:** *“**Write** through SQL; **side effects** through **outbox**.”*
+
+| Moment | Say it like this in the room |
+|--------|------------------------------|
+| **Core** | “**Expense API** → **SQL** sharded by **group_id**; **outbox** for notify and optional **projector**.” |
+| **Read cache** | “**Redis** only accelerates reads—**version**-aware, never the **sole** source of truth.” |
+| **Checkpoint** | “Does **transactional projection** vs **async projector** match how you’d staff this?” |
+
 ```mermaid
 flowchart LR
   C[Clients]
@@ -283,6 +212,20 @@ flowchart LR
 ---
 
 ## 5. Deep dive: critical flow
+
+<a id="say-voice-5"></a>
+#### Human interaction (deep dive — critical flow)
+
+**Habit:** *“Walk **POST expense** like a **transaction**—same order as the sequence diagram.”*
+
+| Step | Say it like this in the room |
+|------|-------------------------------|
+| **Validate** | “Permissions + **split sums** + **rounding**—reject before touching money rows.” |
+| **Commit** | “**BEGIN** → insert **expense + splits** → bump **projection** (or enqueue work) → **outbox row** → **COMMIT**.” |
+| **Concurrency** | “**Hot group** = contention on one shard—**optimistic version** or **row lock**—I’ll say which I’m picking.” |
+| **Anchor** | “First metrics: **409 conflict rate**, **p99 POST**, **projector lag**.” |
+
+This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
 
 ### 5.1 Add expense (happy path)
 
@@ -320,6 +263,17 @@ sequenceDiagram
 
 ## 6. Scaling and bottlenecks
 
+<a id="say-voice-6"></a>
+#### Human interaction (scaling & bottlenecks)
+
+**Habit:** *“**Hot group** and **big history**—name them before they ask.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Hot group** | “**Shard** by `group_id`; narrow lock scope; consider **async projector**.” |
+| **History** | “**Keyset** pagination; **archive** cold expenses.” |
+| **Settlement** | “**Invalidate** suggested transfers on change; don’t recompute **O(n²)** on every GET.” |
+
 | Risk | Mitigation |
 |------|------------|
 | **Hot group** writes | Shard + queue writes; reduce lock scope; eventual projector |
@@ -332,6 +286,17 @@ sequenceDiagram
 
 ## 7. Reliability and failure handling
 
+<a id="say-voice-7"></a>
+#### Human interaction (reliability & failure handling)
+
+**Habit:** *“**Idempotency** on money posts; honest about **projector lag**.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Duplicates** | “**Idempotency-Key** + unique constraint—double tap doesn’t double spend.” |
+| **Partial** | “Split sum mismatch → **rollback**—never half an expense.” |
+| **Lag** | “If projector lags, UX says **updating** or we **read primary** after write.” |
+
 - **Duplicate POST:** `Idempotency-Key` + unique `(client_key)` or dedupe table.  
 - **Split sum mismatch:** reject in transaction; never partial insert.  
 - **Projector lag:** “**Updating…**” UX or **read primary** after write for balances.  
@@ -342,6 +307,16 @@ sequenceDiagram
 ---
 
 ## 8. Tradeoffs and alternatives
+
+<a id="say-voice-8"></a>
+#### Human interaction (tradeoffs & alternatives)
+
+**Habit:** *“**Sync projection** vs **async projector**—pick and defend.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Projection** | “Transactional = **simpler reads**; async = **faster writes**, **temporary lag**.” |
+| **Multi-region** | “**Leader per group** beats split-brain; **CRDT** is a hard sell for arbitrary splits.” |
 
 ### 8.1 Architecture tradeoffs
 
@@ -363,6 +338,16 @@ sequenceDiagram
 
 ## 9. Monitoring, observability, and security
 
+<a id="say-voice-9"></a>
+#### Human interaction (monitoring, observability & security)
+
+**Habit:** *“Watch **money path** latency and **integrity** signals.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **SLIs** | “**p99 POST expense**, **409** rate, **projector lag**, **outbox depth**.” |
+| **Security** | “**No IDOR** on `group_id`; **audit** log for money-like events.” |
+
 **Metrics:** p99 **POST expense**, **409 conflict** rate, projector **lag**, outbox **depth**, balance read errors.
 
 **Security:** strict **group ACL**; no **IDOR** on `group_id`; audit log for money-like events; **encrypt at rest**; **TLS** in transit.
@@ -372,6 +357,8 @@ sequenceDiagram
 ---
 
 ## 10. Design patterns, data structures & best practices
+
+Uber **HLD** rewards naming **ledger**, **transaction**, **outbox** where they sit—not buzzwords alone.
 
 ### 10.1 Distributed / transactional patterns
 
@@ -415,31 +402,48 @@ sequenceDiagram
 | Sync projection | Simple reads vs **write lock** on hot group |
 | Async projector | Write throughput vs **read lag** |
 
+<a id="say-voice-10"></a>
+#### Human interaction (design patterns, data structures & best practices)
+
+**Habit:** *“**Ledger + projection**, **Unit of Work**, **outbox**, **optimistic concurrency**—tie each to a box.”*
+
+| You mean… | Say it like this in the room |
+|-----------|-------------------------------|
+| **Patterns** | “**Append-only ledger**; **transaction** for splits + nets; **outbox** for side effects; **version** on projection for **hot group**.” |
+| **DS** | “**Projection row** per member; **greedy** settlement with sorted nets; **keyset** feed.” |
+
+---
+
+## Closing notes (where wrap-up human interaction lives)
+
+Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups) and [60-second close](#60-second-close)—short answers, not a second design pass.
+
 ---
 
 ## Bar-raiser follow-ups
 
-**Q: “Global low latency writes?”**  
-A: “**Leader per group** or accept cross-region latency; **CRDT** poor fit for arbitrary splits without constraints.”
+<a id="say-voice-bar"></a>
+#### Human interaction (bar-raiser)
 
-**Q: “Rounding?”**  
-A: “**Integer cents**; explicit remainder rule; tests on off-by-one.”
+**Habit:** two–four sentences, then **stop**.
 
-**Q: “Delete expense?”**  
-A: “**Void** + offsetting entry preserves **audit**.”
-
----
-
-## Strong Hire room checklist
-
-- [ ] Spine **1→9**  
-- [ ] Ledger + projection story  
-- [ ] **≤ n−1** settlement  
-- [ ] Concurrency + **hot group**  
-- [ ] Security **IDOR** / audit  
+| They ask | Say it like this |
+|----------|------------------|
+| **Global writes** | “**Leader per group** or eat latency; **CRDT** is a poor default for arbitrary money splits.” |
+| **Rounding** | “**Integer cents**; explicit **remainder** rule; tests on off-by-one.” |
+| **Delete** | “**Void** + offsetting entry—**audit** wins.” |
 
 ---
 
 ## 60-second close
 
-“**Expenses + splits** are **source of truth** in **SQL** (ideally **one transaction** with **projection** updates). **Settlement** is **netting + ≤ n−1** transfers. **Concurrency** is **per-group** ordering or **versioning**; **multi-region** favors **single writer per group**. **Outbox** for side effects; **metrics** on lag and conflicts.”
+<a id="say-voice-close"></a>
+#### Human interaction (60-second close)
+
+**Habit:** one **net-net** pass.
+
+| Beat | Say it like this in the room |
+|------|------------------------------|
+| **Recap** | “**Ledger** in **SQL**—**append-only** expenses and payments; **balances** as **projection** (sync or async); **settlement** = **net + ≤ n−1**; **per-group** concurrency; **outbox** for notify; **metrics** on **lag** and **409s**.” |
+
+---
