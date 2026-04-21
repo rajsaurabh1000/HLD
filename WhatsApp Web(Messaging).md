@@ -30,6 +30,7 @@
 - [7. Reliability and failure handling](#7-reliability-and-failure-handling)
 - [8. Tradeoffs and alternatives](#8-tradeoffs-and-alternatives)
 - [9. Monitoring, observability, and security](#9-monitoring-observability-and-security)
+- [10. Design patterns, data structures & best practices](#10-design-patterns-data-structures--best-practices)
 
 **Wrap-up**
 
@@ -345,6 +346,53 @@ sequenceDiagram
 **Security:** TLS; **token** scoped to chat; **rate limit** sends; **content abuse** pipeline (async); **GDPR delete** = tombstone + async scrub from object store.
 
 **Tracing:** span `send → persist → enqueue → push`.
+
+---
+
+## 10. Design patterns, data structures & best practices
+
+### 10.1 Distributed / real-time patterns
+
+| Pattern | Where | Why |
+|---------|--------|-----|
+| **Connection registry** | Gateway ↔ user session | Route push to correct box |
+| **Back-pressure** | WS send path | Avoid OOM when client slow |
+| **Circuit breaker** | Downstream DB / push | Fail fast; shed load |
+| **Bulkhead** | Separate pools for **send** vs **presence** | One path cannot starve the other |
+| **Outbox / WAL** | After DB commit enqueue delivery | No lost messages on crash |
+| **Idempotent consumer** | Delivery worker | At-least-once safe |
+| **Leader election** | Per-chat writer (optional) | Ordering + failover without split brain |
+
+### 10.2 Classic patterns
+
+| Pattern | Map |
+|---------|-----|
+| **State machine** | Message: accepted → persisted → delivered → read (optional) |
+| **Command** | `SendMessage` handler isolates validation + persist |
+| **Observer** | Presence / typing fan-out (careful: rate limit) |
+| **Strategy** | Long-poll vs WS vs SSE per client capability |
+
+### 10.3 Data structures
+
+| Need | Structure |
+|------|-----------|
+| Per-chat order | Monotonic **server_seq** (bigint) |
+| Dedupe | **Set** or DB unique on `(chat_id, client_msg_id)` |
+| Unread counts | **Counter** per user+chat or materialized inbox row |
+| Hot fan-out | **Partitioned** outbox queue by `chat_id` |
+
+### 10.4 Best practices
+
+- **Persist before push**; ack only after durable write.  
+- **Client idempotency** + server sequence for ordering UI.  
+- **Pagination** keyset on `(server_seq)` not offset.
+
+### 10.5 Trade-offs
+
+| Pick | Trade |
+|------|--------|
+| Per-user inbox materialization | Fast read home vs **write amplification** |
+| Pull (catch-up API) | Simple recovery vs **latency** vs push |
 
 ---
 
