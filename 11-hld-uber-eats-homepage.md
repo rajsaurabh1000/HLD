@@ -6,25 +6,42 @@
 
 ## User journey (say once early)
 
-*“From the user perspective: **(prep: one–two lines for this system)**.”*
+“From user perspective:
 
-*“So: **write path** = … ; **read path** = … ; **async path** = ….”* — fill with concrete nouns from **Section 1** and your diagram as you speak.
+User opens app → location resolved → nearby restaurants fetched → ranked → homepage sections assembled.
 
-## Thinking transitions (use during interview)
-
-- *“Let me think through this…”*
-- *“One tradeoff here is…”*
-- *“If I optimize for latency…”*
-- *“This might become a bottleneck because…”*
-- *“I’d start simple here and evolve later…”*
+So:
+- read path = homepage fetch
+- write path = orders (separate system)
+- async path = impressions, clicks, ranking signals”
 
 ## Consistency model
 
-*“**Strong** consistency for **(critical part)** because **(reason)** ; **eventual** for **(non-critical)** because **(reason)** . Under load we prioritize **(latency / correctness / availability)** on **(which surface)** .”* — align with **Section 1 invariants** and any dedicated consistency blocks in this guide.
+Strong consistency for:
+- eligibility (in-zone, open/closed)
+
+Eventual consistency for:
+- ranking
+- trending
+- popularity metrics
+
+We prioritize:
+latency over freshness for homepage browse,
+but correctness for serviceability (trust)
 
 ## Decision (strong opinion)
 
-*“I’d start with **X** because **(reason)** . If **(scale / requirements / signals)** change, I’d evolve to **Y**.”* — state your real default from **Section 8** in the room.
+I’d start with:
+
+- geohash/H3 based geo indexing (fast + scalable)
+- Redis for hot geo cells
+- two-stage ranking (cheap + rerank)
+
+because latency is critical for homepage.
+
+If scale grows:
+- move to precomputed ranking
+- add ML-based ranking
 
 ## Evolution
 
@@ -38,29 +55,23 @@ Details: **Section 4.1 (phases)** and **Section 5** in this file.
 
 ## Bottleneck anchor
 
-*“The main bottlenecks I expect are **(1)** and **(2)** —that’s what I’d monitor first.”* — concrete wording lives under **Section 5 — Bottleneck** in this guide.
+The main bottlenecks I expect:
+
+- hot geocells (dense areas)
+- ranking latency (p99 tail)
+
+That’s what I’d monitor first
 
 ## UX awareness
 
-*“If this behaves badly, users see **(impact)** —so we prioritize **(trust lever)** .”* — tie to **reliability / degrade / UX** sections later in this guide.
+If this behaves badly:
 
-## Driving the conversation
+- user sees empty homepage
+- wrong restaurants (out of zone)
+- slow loading experience
 
-- *“Does this direction make sense?”*
-- *“Should I go deeper on **A** or **B**?”*
-- *“Would you like failure scenarios next?”*
-
-## Mindset (before you walk in)
-
-*“I’m not presenting a solution—I’m **designing with a teammate**.”*
-
-**Rehearsal beats editing:** speak aloud, practice **pauses**, simulate **interruptions**. **Playbook:** [HLD-BAR-RAISER-PERFORMANCE-PACK.md](./HLD-BAR-RAISER-PERFORMANCE-PACK.md).
-
----
-
-<a id="interview-spine-nine-steps"></a>
-
-> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+So we prioritize:
+correct eligibility and fast response over perfect ranking
 
 ## Interview delivery (golden thread — live thinking)
 
@@ -82,29 +93,6 @@ Bar-raiser polish: **user-first**, **explicit consistency**, **bottleneck**, **e
 
 ## 1. Clarify requirements
 
-### 1.0 Live flow (how to open and steer)
-
-<a id="live-flow-open"></a>
-
-#### Live voice (real interviewer room)
-
-**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
-
-**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
-
-**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
-
-**This topic in one breath:** “Homepage is **eligibility + rank + assembly** under a **p99** budget—I’ll separate **trust** (geo/hours) from **taste** (rank).”
-
-**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
-
-**Opening (~once):** *“I’ll align on **homepage scope**, **location + trust**, rough **p99**; then **scale**, **APIs + ownership**, **architecture**, and **`GET /home`** end-to-end. I’ll **pause after the diagram**—does that sequencing work, and where do you want depth: **geo**, **rank**, or **cache**?”*
-
-**Thinking transitions** (use **between** topics so it feels like *design*, not *recital*): *“Let me think through …”* · *“One tradeoff here is …”* · *“If I optimize for latency I’d …”* · *“Let me sanity-check …”* · *“I’d start simple and evolve when …”*
-
-**Live rule:** **Paraphrase** §1–2 tables; don’t read every row. Deeper bullets = **only if they probe**.
-
-<a id="say-1-questions-human"></a>
 ### 1.1 Clarify 
 
 | Topic | Say it like this in the room |
@@ -419,6 +407,9 @@ flowchart LR
 ```
 
 **Human narration:** “This is a **read funnel**: cheap **geo filter** widens to a capped set, then **expensive scoring** runs only on that set. Writes to orders stay on the **async** path feeding **aggregates**.”
+
+“Does this architecture make sense so far?
+I can go deeper into geo, ranking, or caching.”
 
 ### 4.1 How we’d evolve this (if they ask “phases / MVP”)
 
