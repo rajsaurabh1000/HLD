@@ -30,6 +30,7 @@
 - [7. Reliability and failure handling](#7-reliability-and-failure-handling)
 - [8. Tradeoffs and alternatives](#8-tradeoffs-and-alternatives)
 - [9. Monitoring, observability, and security](#9-monitoring-observability-and-security)
+- [10. Design patterns, data structures & best practices](#10-design-patterns-data-structures--best-practices)
 
 **Wrap-up**
 
@@ -418,6 +419,58 @@ sequenceDiagram
 **Security:** authenticate **trending** APIs if personalized; **rate limit** `/events` and PLP; **WAF** on edge; **no secrets** in URLs; scrub PII in logs.
 
 **Dashboards:** trending freshness vs wall clock, top lagging partitions, Redis memory.
+
+---
+
+## 10. Design patterns, data structures & best practices
+
+### 10.1 Distributed / architectural patterns
+
+| Pattern | Where | Why |
+|---------|--------|-----|
+| **Event-driven** + **log** | Kafka as append-only event bus | Replay, fan-out to BI/search/fraud |
+| **CQRS-lite** | Catalog **read model** vs order **write model** | Different shapes; scale reads |
+| **Idempotent consumer** | Stream workers | **At-least-once** Kafka + safe sinks |
+| **Outbox** (if cross-service) | Publish after DB commit | Reliable cross-system events |
+| **Circuit breaker** | Flink sink to Redis, OpenSearch | Fail fast; don’t retry-storm |
+| **Bulkhead** | Separate consumer groups per topic | Isolate hot **view** topic from **purchase** |
+| **Cache-aside** | PDP Redis + ETag | Control staleness explicitly |
+| **API Gateway / BFF** | Browse tier | Auth, rate limits, response shaping |
+| **Strategy** | Weighted scoring (purchase &gt; cart &gt; view) | Swap weights without redeploying all code |
+| **Anti-corruption layer** | Beacon validation before Kafka | Bad payloads never poison core |
+
+### 10.2 Classic patterns (service internals)
+
+| Pattern | Map |
+|---------|-----|
+| **Template method** | Validate → enrich → aggregate → sink pipeline |
+| **Chain of responsibility** | Validation filters on `/events` |
+| **Observer** | Webhooks / internal subscribers (optional) |
+
+### 10.3 Data structures
+
+| Use | Structure | Why |
+|-----|-----------|-----|
+| Trending / top-K | **Redis ZSET** (sorted set) | O(log N) increments, range by score |
+| Unique visitors | **HyperLogLog** | Memory-bounded cardinality |
+| Partitioning | **Hash** of `product_id` / `user_id` | Balance Kafka partitions |
+| Catalog doc | **JSON document** / BSON | Flexible attributes |
+| Search | **Inverted index** + BKD/geo | Keyword + filter queries |
+
+### 10.4 Best practices
+
+- **Never** block PDP on Kafka **ack**.  
+- **event_id** dedupe; **DLQ** + replay.  
+- **Coalesce** beacons client-side when possible.  
+- **Label** stale trending in UX.
+
+### 10.5 Trade-offs
+
+| Choice | Trade |
+|--------|--------|
+| Mongo vs SQL catalog | Flex vs joins/reporting |
+| Big vs small aggregation windows | Smooth vs responsive |
+| Strong sync trending | Correctness vs **latency** |
 
 ---
 
