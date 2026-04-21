@@ -1,161 +1,36 @@
 # HLD — Notification System (Stock Price Alerts)
 
-> **GitHub README style** — pair with [HLD-README.md](./HLD-README.md).
-
-| | |
-|--|--|
-| **Round** | 35–45 min |
-| **Strong-hire hooks** | **Partitioned event stream**, **edge-triggered state**, **dedupe + rate limit**, **outbox to channels** |
-
----
-
-## Table of contents
-
-**Prep**
-
-- [Interview plan](#interview-plan)
-- [SDE-2 drive kit (Senior interviewer)](#sde-2-drive-kit-senior-interviewer)
-- [Strong-hire signals](#strong-hire-signals)
-- [Coverage map](#coverage-map)
-
-**Interview spine (nine steps)**
-
-- [Interview spine (nine steps)](#interview-spine-nine-steps)
-- [1. Clarify requirements](#1-clarify-requirements)
-- [2. Estimate scale](#2-estimate-scale)
-- [3. APIs and data model](#3-apis-and-data-model)
-- [4. High-level architecture](#4-high-level-architecture)
-- [5. Deep dive: tick to notify](#5-deep-dive-tick-to-notify)
-- [6. Scaling and bottlenecks](#6-scaling-and-bottlenecks)
-- [7. Reliability and failure handling](#7-reliability-and-failure-handling)
-- [8. Tradeoffs and alternatives](#8-tradeoffs-and-alternatives)
-- [9. Monitoring, observability, and security](#9-monitoring-observability-and-security)
-- [10. Design patterns, data structures & best practices](#10-design-patterns-data-structures--best-practices)
-
-**Wrap-up**
-
-- [Bar-raiser follow-ups](#bar-raiser-follow-ups)
-- [Strong Hire room checklist](#strong-hire-room-checklist)
-- [60-second close](#60-second-close)
-
----
-
-## Interview plan
-
-> “I’ll clarify **alert semantics** (edge vs level), **channels**, quiet hours, and **repeat** policy. Ingest ticks into a **partitioned durable log** keyed by symbol; **stateless matchers** load rules, run a **small state machine**, then **outbox** to channel workers with **dedupe** and **rate limits**. I’ll deep dive **one tick** end-to-end.”
-
----
-
-## SDE-2 drive kit (Senior interviewer)
-
-### A. Lock the agenda
-
-Clarify → scale → rules API/model → architecture → **tick→match→outbox→channel** → hot symbols → failures → tradeoffs → monitoring/security. **Pause:** “Depth on **matching state**, **delivery**, or **cost (SMS)**?”
-
-### B. Questions — **this order**
-
-| # | Ask |
-|---|-----|
-| 1 | “**Edge-triggered** once per cross vs **every tick** while true?” |
-| 2 | “**Cooldown** / anti-flapping policy?” |
-| 3 | “Channel priority: **SMS vs push vs email**?” |
-| 4 | “**Quiet hours** / timezone per user?” |
-| 5 | “Market data **delay** we disclose?” |
-| 6 | “Rule edits **versioned** while ticks in flight?” |
-
-**Mirror:** “So dedupe is defined per **crossing**, not per tick.”
-
-### C. Winning line per spine
-
-| Step | Sentence |
-|------|----------|
-| 1 | “**Invariant**: bounded duplicates per crossing.” |
-| 2 | “Skewed symbols ⇒ **partition** by symbol.” |
-| 3 | “Rules in DB; **hot cache** symbol→rules in matcher.” |
-| 4 | “Ingest → **Kafka keyed by symbol** → matchers → **outbox**.” |
-| 5 | “**FSM** on last price + threshold + hysteresis/cooldown.” |
-| 6 | “Dedicated lane for **mega-cap**; **coalesce** ticks if allowed.” |
-| 7 | “DLQ, provider **circuit breaker**, **gap** detection on feed.” |
-| 8 | “Coalesce vs precision; cache vs fresh rules.” |
-| 9 | “tick→notify **p99**; **$ SMS**; auth on rule APIs.” |
-
-### D. Whiteboard order
-
-1. Feed → normalize → **partitioned log**.  
-2. Matcher → **state** → dedupe → **outbox** → channels.  
-3. One **sequence** for tick.
-
-### E. Senior probes
-
-| Probe | Answer |
-|-------|--------|
-| “Hot symbol?” | “**Isolate partitions** + optional **dedicated** consumer pool; **pre-filter** rules.” |
-| “At-least-once ticks?” | “Matchers **idempotent** with **dedupe key** on `(user,rule,crossing)`.” |
-
-### F. Time crunched
-
-**Partition + edge detect + outbox** only.
-
-### G. Anti-patterns
-
-- SMS without **rate limit / cost** awareness.  
-- No **dedupe** story on duplicate ticks/consumers.
-
----
-
-## Strong-hire signals
-
-- **Hot symbols** isolated (**partition** / dedicated lane).  
-- **Edge-triggered** vs spammy **level** alerts clarified.  
-- **Dedupe keys** + **cooldown**.  
-- **Backpressure** before expensive SMS.
-
----
-
-## Coverage map
-
-- [ ] [Nine-step spine](#interview-spine-nine-steps)  
-- [ ] Market ingest + normalization  
-- [ ] Pub/sub partitioning  
-- [ ] Subscription index  
-- [ ] Matcher state machine  
-- [ ] Outbox + DLQ  
-- [ ] Multi-channel priorities  
-- [ ] CAP / rule staleness  
-
----
-
-## Interview spine (nine steps)
-
-| Step | What you deliver | Section |
-|------|------------------|---------|
-| **1** | Clarify requirements | [§1](#1-clarify-requirements) |
-| **2** | Estimate scale | [§2](#2-estimate-scale) |
-| **3** | APIs / data model | [§3](#3-apis-and-data-model) |
-| **4** | High-level architecture | [§4](#4-high-level-architecture) |
-| **5** | Deep dive critical flow | [§5](#5-deep-dive-tick-to-notify) |
-| **6** | Scaling / bottlenecks | [§6](#6-scaling-and-bottlenecks) |
-| **7** | Reliability / failure handling | [§7](#7-reliability-and-failure-handling) |
-| **8** | Tradeoffs / alternatives | [§8](#8-tradeoffs-and-alternatives) |
-| **9** | Monitoring / security | [§9](#9-monitoring-observability-and-security) |
-
----
+<a id="interview-spine-nine-steps"></a>
 
 ## 1. Clarify requirements
 
-### 1.1 Questions to ask first
+<a id="say-1-questions-human"></a>
+### 1.1 Clarify 
 
-| Question | Why it matters |
-|----------|----------------|
-| **Edge-triggered** (fire once on cross) vs **while true** (every tick)? | Spam, dedupe |
-| **Channels:** push, email, SMS—in **priority** order? | Mixer, cost |
-| **Quiet hours** / user timezone? | Queue vs suppress |
-| **Market data delay** disclosure? | UX copy |
-| **Cooldown** per rule? | Flapping |
-| **International** SMS cost caps? | Product guardrails |
-| **User edits rule** while tick in flight? | Versioning |
+| Topic | Say it like this in the room |
+|--------------------------|-------------------------------|
+| **Semantics** | “**Edge-triggered** once per **cross** vs **every tick** while true—dedupe lives on the **crossing**, right?” |
+| **Channels** | “**Push vs email vs SMS**—priority and **cost** caps?” |
+| **Quiet hours** | “**Timezone** per user—queue vs suppress?” |
+| **Disclosure** | “Any **market data delay** we show in copy?” |
+| **Anti-flap** | “**Cooldown** / hysteresis so we don’t spam?” |
+| **Rules in flight** | “If a user **edits** a rule mid-tick, is there a **version** story?” |
 
-### 1.2 Functional requirements (FR)
+**Micro-pauses:** *“So I’ll **partition** by symbol, **edge-detect**, then **outbox** with **dedupe** and **rate limits**—especially before SMS.”*
+
+### 1.2 Functional requirements (FR) — after alignment, say this as “what we must build”
+
+<a id="say-fr-human"></a>
+#### Human interaction (FR — how to explain after alignment)
+
+**Habit:** *“**Rules**, **ticks**, **match**, **deliver**—four verbs.”*
+
+| FR area | Say it like this in the room |
+|---------|-------------------------------|
+| **Rules** | “Users define **symbol**, comparator, threshold, optional **%**, **cooldown**, **channels**.” |
+| **Ticks** | “Ingest **`symbol, price, ts, seq`** normalized from vendors.” |
+| **Match** | “Detect **threshold crossing** with hysteresis if needed.” |
+| **Deliver** | “Notify on **email/push/SMS**; optional **history** of fired alerts.” |
 
 **Subscriptions**
 
@@ -173,7 +48,19 @@ Clarify → scale → rules API/model → architecture → **tick→match→outb
 
 - Send notifications via **email**, **push**, **SMS** with templates; **history** of fired alerts optional.
 
-### 1.3 Non-functional requirements (NFR)
+### 1.3 Non-functional requirements (NFR) — say as “how it must behave”
+
+<a id="say-nfr-human"></a>
+#### Human interaction (NFR — how to say “how it must behave”)
+
+**Habit:** *“**At-least-once** ticks; **at-most-once per crossing** to users; **SMS** = money.”*
+
+| NFR area | Say it like this in the room |
+|----------|-------------------------------|
+| **Semantics** | “**At-least-once** through the log; **dedupe** + **cooldown** so UX isn’t spam.” |
+| **Latency** | “Tick→notify **SLO**—sub-second vs seconds, align in room.” |
+| **Cost** | “**Rate limit** and **shape** SMS; **circuit breaker** on providers.” |
+| **Security** | “**Auth** on rule APIs; **vault** for provider secrets.” |
 
 **Throughput**
 
@@ -199,13 +86,32 @@ Clarify → scale → rules API/model → architecture → **tick→match→outb
 
 - **AuthN** on rule APIs; **no** leaking other users’ rules; **secrets** for providers in vault.
 
-### 1.4 Invariant
+### 1.4 Invariants (one sentence you repeat under pressure)
 
 **Invariant:** “No **unbounded** duplicate notifications for the **same logical crossing** without an explicit **repeat** / **cooldown** policy.”
+
+<a id="say-voice-1"></a>
+
+**Purpose:** handoff → **partition → match → dedupe → outbox → channel**.
+
+| Beat | Say it like this |
+|------|------------------|
+| **Bridge** | “Dedupe is keyed on **crossing**, not every raw tick.” |
+| **Skew** | “Hot symbols get **dedicated partitions** or lanes so matchers don’t melt.” |
 
 ---
 
 ## 2. Estimate scale
+
+<a id="say-voice-2"></a>
+#### Human interaction (estimate scale)
+
+**Habit:** *“**Skew** is the story—mega-cap symbols.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Skew** | “Rules and ticks **clump** on liquid names—**partition by symbol**.” |
+| **CPU** | “Optional **coalesce** window (e.g. **100ms**) if product accepts less precision.” |
 
 | Dimension | Notes |
 |-----------|--------|
@@ -214,9 +120,22 @@ Clarify → scale → rules API/model → architecture → **tick→match→outb
 | Ticks | High **QPS** per hot symbol—**partition** mandatory |
 | Coalesce window | Optional **100ms** batching to cut CPU |
 
+**Tie it in one line:** “**Horizontal matchers** + **symbol partitions** + **backpressure** before expensive channels.”
+
 ---
 
 ## 3. APIs and data model
+
+<a id="say-voice-3"></a>
+#### Human interaction (APIs & data model)
+
+**Habit:** *“**Rules** in DB; **state** for FSM; **outbox** for delivery.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **APIs** | “CRUD **rules**; internal **tick produce** keyed by **symbol**.” |
+| **State** | “**last_price** / FSM per **(user, rule)** in Redis or SQL.” |
+| **Outbox** | “Rows with **`dedupe_key`**, channel, status—workers **retry** safely.” |
 
 ### 3.1 APIs (sketch)
 
@@ -238,6 +157,17 @@ Clarify → scale → rules API/model → architecture → **tick→match→outb
 ---
 
 ## 4. High-level architecture
+
+<a id="say-voice-4"></a>
+#### Human interaction (high-level architecture / HLD)
+
+**Habit:** *“**Ingest → partitioned log → matcher → dedupe → outbox → channels**.”*
+
+| Moment | Say it like this in the room |
+|--------|------------------------------|
+| **Log** | “Ticks land in **Kafka/Pulsar** keyed by **`symbol`**.” |
+| **Match** | “Matchers pull **rules** for that symbol, run **edge FSM**, then **dedupe**.” |
+| **Send** | “**Outbox** per channel with **breakers** on Twilio/FCM/etc.” |
 
 ```mermaid
 flowchart LR
@@ -264,6 +194,19 @@ flowchart LR
 ---
 
 ## 5. Deep dive: tick to notify
+
+<a id="say-voice-5"></a>
+#### Human interaction (deep dive — critical flow)
+
+**Habit:** *“Walk **one tick** through **partition → state → dedupe → outbox**.”*
+
+| Step | Say it like this in the room |
+|------|-------------------------------|
+| **Ingest** | “Normalize **`seq`**; produce to **symbol partition**.” |
+| **Match** | “Load rules; read **state**; **edge detect**; apply **cooldown**.” |
+| **Deliver** | “**Dedupe key** per crossing; enqueue **outbox**; channel worker **retries** with **breaker**.” |
+
+This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
 
 ```mermaid
 sequenceDiagram
@@ -295,6 +238,16 @@ sequenceDiagram
 
 ## 6. Scaling and bottlenecks
 
+<a id="say-voice-6"></a>
+#### Human interaction (scaling & bottlenecks)
+
+**Habit:** *“**Hot symbol** first.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Hot symbol** | “Dedicated **partitions** / pools; **pre-filter** empty rule sets.” |
+| **SMS** | “**Queue** + **shape** sends; **tier** priorities.” |
+
 | Risk | Mitigation |
 |------|------------|
 | **Hot symbol** | Dedicated partitions; **local** rule index per matcher shard |
@@ -308,6 +261,16 @@ sequenceDiagram
 
 ## 7. Reliability and failure handling
 
+<a id="say-voice-7"></a>
+#### Human interaction (reliability & failure handling)
+
+**Habit:** *“**DLQ**, **replay**, **gap detect** on feed.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Gaps** | “Detect missing **seq**; **replay** from vendor; honest **stale** UX if needed.” |
+| **Providers** | “**DLQ** + delayed retry; don’t drop **crossing intent** until channel **acks**.” |
+
 - **Feed gap:** gap detector; **replay** request to vendor; user-visible **stale** banner if needed.  
 - **Poison message:** **DLQ**; fix and **replay**.  
 - **Provider outage:** **DLQ** + delayed retry; **never** lose crossing intent in **outbox** until acknowledged.  
@@ -316,6 +279,16 @@ sequenceDiagram
 ---
 
 ## 8. Tradeoffs and alternatives
+
+<a id="say-voice-8"></a>
+#### Human interaction (tradeoffs & alternatives)
+
+**Habit:** *“**Precision vs CPU**; **fresh rules vs cache**.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Coalesce** | “Batch ticks—cheaper, less **precise**.” |
+| **Pull rules** | “DB each tick—**fresh**; cache+TTL—**fast** but **staler**.” |
 
 | Choice | Good | Bad |
 |--------|------|-----|
@@ -330,6 +303,16 @@ sequenceDiagram
 
 ## 9. Monitoring, observability, and security
 
+<a id="say-voice-9"></a>
+#### Human interaction (monitoring, observability & security)
+
+**Habit:** *“**tick→notify p99** and **$ per hour** on SMS.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Metrics** | “**Lag**, dedupe **hit rate**, provider **errors**, **SMS spend**.” |
+| **Security** | “**Audit** high-volume rule creators; **encrypt** PII.” |
+
 **Metrics:** tick→notify **p99**, matcher **lag**, dedupe hit rate, **provider error** rate, **SMS $/hour**.
 
 **Alerts:** sustained **DLQ** growth, **gap** in tick sequence, **quota** exhaustion.
@@ -339,6 +322,8 @@ sequenceDiagram
 ---
 
 ## 10. Design patterns, data structures & best practices
+
+Name **partitioned stream**, **FSM**, **outbox**, **breaker** on the diagram.
 
 ### 10.1 Event / delivery patterns
 
@@ -382,28 +367,47 @@ sequenceDiagram
 | Evaluate every tick | Simple vs **CPU** at scale |
 | Coalesce ticks | Cheaper vs **precision** |
 
+<a id="say-voice-10"></a>
+#### Human interaction (design patterns, data structures & best practices)
+
+**Habit:** *“**Edge-triggered FSM**, **dedupe**, **outbox**, **adapter** per channel.”*
+
+| You mean… | Say it like this in the room |
+|-----------|-------------------------------|
+| **Patterns** | “**Partitioned** tick log; **state machine** per rule; **outbox** for reliable send; **chain** quiet hours→dedupe→throttle.” |
+| **DS** | “Inverted **symbol→rule_ids**; **TTL** cooldown keys; **priority queue** for scheduled sends.” |
+
+---
+
+## Closing notes (where wrap-up human interaction lives)
+
+Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups) and [60-second close](#60-second-close).
+
 ---
 
 ## Bar-raiser follow-ups
 
-**Q: “Global users, US hours?”**  
-A: “**Quiet hours** per TZ; **queue** sends.”
+<a id="say-voice-bar"></a>
+#### Human interaction (bar-raiser)
 
-**Q: “Rule update mid-flight?”**  
-A: “**Version** on rule; matcher uses **consistent snapshot** or post-delivery reconcile.”
+**Habit:** two–four sentences, then **stop**.
 
----
-
-## Strong Hire room checklist
-
-- [ ] Spine **1→9**  
-- [ ] **Edge** vs level + **dedupe**  
-- [ ] **Partition** hot symbols  
-- [ ] **Outbox** + retries + DLQ  
-- [ ] Cost + security on SMS  
+| They ask | Say it like this |
+|----------|------------------|
+| **TZ / quiet hours** | “**Per-user TZ**; **queue** or suppress during quiet window.” |
+| **Rule updates** | “**Version** rules; matcher uses **snapshot** or reconciles after send.” |
 
 ---
 
 ## 60-second close
 
-“**Ticks** on a **partitioned durable log** by **symbol**; **matchers** load **rules**, run **edge detection** with **state**, then **dedupe + rate limit** into an **outbox**; **channel workers** send with **retries/DLQ**. **Scale** = horizontal matchers, **symbol isolation**, optional **tick coalescing**.”
+<a id="say-voice-close"></a>
+#### Human interaction (60-second close)
+
+**Habit:** one **net-net** pass.
+
+| Beat | Say it like this in the room |
+|------|------------------------------|
+| **Recap** | “**Ticks** → **partitioned log** by **symbol** → **matchers** + **FSM** → **dedupe/rate limit** → **outbox** → **channel workers** with **retry/DLQ**; **hot symbols** isolated; **SMS** cost-aware.” |
+
+---
