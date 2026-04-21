@@ -121,7 +121,8 @@
 2. “**One transaction** (or explicit projector) per expense—**splits + nets** stay **atomic**.”  
 3. “**Idempotency** on POST—money paths don’t **double** on retry.”  
 4. “**Hot group** = **shard/version/lock** story—say which you pick.”  
-5. “**Outbox** for anything a user **expects** to happen after the commit.”
+5. “**Outbox** for anything a user **expects** to happen after the commit.”  
+6. “**User journey** (say once)—[expense → validate → immutable row → balances → nets → settlements](#user-journey-framing); then map **write correctness** vs **read visibility**.”
 
 <a id="say-voice-1"></a>
 
@@ -210,6 +211,24 @@
 
 ---
 
+## 👤 User journey (say once early)
+
+<a id="user-journey-framing"></a>
+
+**Say it once early** (near the [architecture diagram](#4-high-level-architecture)):
+
+*“I think of this from **user** perspective:
+
+User **adds** an expense → system **validates** and records it as an **immutable** entry → **balances** update **immediately** (same transaction) **or** via **projection** if we’ve split async → user sees **updated net** → **settlement** suggestions **recompute**.
+
+So:
+- **write path** ensures **correctness**  
+- **read path** ensures **fast visibility** (projection / cache—never silent wrong money).”*
+
+👉 One pass—**intuitive** for interviewers who think in screens, not only tables.
+
+---
+
 ## 4. High-level architecture
 
 <a id="say-voice-4"></a>
@@ -220,6 +239,7 @@
 | Moment | Say it like this in the room |
 |--------|------------------------------|
 | **Core** | “**Expense API** → **SQL** sharded by **group_id**; **outbox** for notify and optional **projector**.” |
+| **User journey** | “Same beat as [👤 User journey](#user-journey-framing): **post** → **ledger** → **balances** → **settlement**—**writes** correct, **reads** fast.” |
 | **Read cache** | “**Redis** only accelerates reads—**version**-aware, never the **sole** source of truth.” |
 | **Checkpoint** | “Does **transactional projection** vs **async projector** match how you’d staff this?” |
 | **Steer** | “**Deeper** on **write path**, **settlement read**, or **failure / outbox** next?” |
@@ -263,13 +283,24 @@ flowchart LR
 |------|-------------------------------|
 | **Validate** | “Permissions + **split sums** + **rounding**—reject before touching money rows.” |
 | **Commit** | “**BEGIN** → insert **expense + splits** → bump **projection** (or enqueue work) → **outbox row** → **COMMIT**.” |
-| **Concurrency** | “**Hot group** = contention on one shard—**optimistic version** or **row lock**—I’ll say which I’m picking.” |
-| **Anchor** | “First metrics: **409 conflict rate**, **p99 POST**, **projector lag**.” |
+| **Concurrency** | “**I’d default optimistic locking** on the projection for **scalability**; **pessimistic** `FOR UPDATE` if **contention** (409 rate) becomes **too high**—then we revisit.” |
+| **Anchor** | “Say **once**—[🎯 Bottleneck Anchor](#bottleneck-anchor-once).” |
 | **Production voice** | “**Double tap** on POST—**unique idempotency**; **split sum** reject before commit; **outbox relay** stuck—**depth** alert; **hot group**—**version** conflicts spike.” |
 
 This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
 
-**Taking a stance:** *“I’d default **Postgres + shard by `group_id`** with **optimistic version** on projection; **pessimistic** `FOR UPDATE` only if the room wants the simplest story and accepts **contention**.”*
+<a id="bottleneck-anchor-once"></a>
+### 🎯 Bottleneck Anchor
+
+**Say once in the deep dive:**
+
+*“The main bottleneck here is usually **hot-group write contention** on the shard, **or** **projector lag** affecting how **fresh** balances feel after a write.*
+
+*That’s what I’d **monitor first**.”*
+
+👉 **Prioritization**—then drill **409s**, **outbox depth**, and **p99 POST** as proof.
+
+**Taking a stance:** *“**Postgres** sharded by **`group_id`**; **I’d default optimistic locking** on the balance projection for **scalability**, and **fall back to pessimistic** `FOR UPDATE` if **contention** gets **too high**. Same story for **transactional vs async projector**—start simple, split when **lag** metrics force it.”*
 
 ### 5.1 Add expense (happy path)
 
@@ -299,8 +330,8 @@ sequenceDiagram
 
 ### 5.3 Concurrency (same section as “what breaks”)
 
-- **Optimistic locking** on `balance_projection.version`.  
-- **Pessimistic** `SELECT … FOR UPDATE` on group row—simple, **hot group** risk.  
+- **Default:** **optimistic locking** on `balance_projection.version`—scales better for typical groups.  
+- **Fallback:** **pessimistic** `SELECT … FOR UPDATE` on group row if **409**/conflict rate proves **contention** is too high—simpler, watch **hot group** tail.  
 - **Shard by `group_id`** to co-locate contention.
 
 ---
@@ -366,6 +397,7 @@ sequenceDiagram
 | **Multi-region** | “**Leader per group** beats split-brain; **CRDT** is a hard sell for arbitrary splits.” |
 | **My default (writes)** | “**Transactional** projection + **outbox** until scale proves **async projector**.” |
 | **My default (reads)** | “**Projection table** for O(members) balance; **keyset** history; **invalidate** settlement on change.” |
+| **My default (concurrency)** | “**Optimistic** first; **pessimistic** `FOR UPDATE` if **hot group** contention metrics say so.” |
 
 ### 8.1 Architecture tradeoffs
 
@@ -415,8 +447,8 @@ Uber **HLD** rewards naming **ledger**, **transaction**, **outbox** where they s
 |---------|--------|-----|
 | **Ledger + projection** | Expenses immutable; balances derived | Audit + rebuild; **event sourcing**-like without naming it if uncomfortable |
 | **Unit of Work / Transaction** | Single **DB transaction** per expense post | Atomic splits + balance bump |
-| **Optimistic concurrency** | `version` on projection row | Hot group without long locks |
-| **Pessimistic lock** | `SELECT … FOR UPDATE` on group | Simpler mental model; watch **contention** |
+| **Optimistic concurrency** | `version` on projection row | **Default** for scalability; hot group without long locks |
+| **Pessimistic lock** | `SELECT … FOR UPDATE` on group | **Fallback** if optimistic **409** rate too high; watch **contention** |
 | **Outbox** | After commit publish `ExpenseCreated` | Reliable side effects |
 | **Idempotency key** | `POST /expenses` | Double-submit safe |
 | **Saga** | Rare for single service; **multi-service** settlement extension | Compensating transactions if money movement splits |
@@ -476,7 +508,7 @@ Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Co
 |--------------------|---------------------------|
 | **State the invariant** early | Listing tables with no “why” |
 | **Ask** projection vs sync in the room | One canned diagram with no checkpoint |
-| **Default + caveat** on locks vs optimistic | “Both work” with no pick |
+| **Default + caveat** (optimistic first, pessimistic if contention) | “Both work” with no pick |
 | **Ack money fear** explicitly | Hand-waving concurrency |
 | **Time-box** deep dives | Finishing every edge case |
 
