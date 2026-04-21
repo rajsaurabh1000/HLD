@@ -1,0 +1,296 @@
+# HLD — Uber Eats Homepage
+
+> **GitHub README style:** use this as a single scrollable brief—diagrams render in GitHub’s markdown preview. Practice **out loud** using [HLD-README.md](./HLD-README.md) for the global “Strong Hire” playbook.
+
+| | |
+|--|--|
+| **Round** | 45–60 min · Bar Raiser favorite |
+| **Strong-hire hooks** | Geo correctness + boundary cells, ranking **timeouts + fallback**, cache **freshness vs SLO**, metrics from **facts** not cache |
+
+---
+
+## Table of contents
+
+- [Interview plan (first 90 seconds)](#interview-plan-first-90-seconds)
+- [Strong-hire signals for this problem](#strong-hire-signals-for-this-problem)
+- [Coverage map](#coverage-map)
+- [Clarifying questions](#clarifying-questions)
+- [FR, NFR, invariant](#fr-nfr-invariant)
+- [Back-of-napkin scale](#back-of-napkin-scale)
+- [Architecture](#architecture)
+- [Critical path (deep dive)](#critical-path-deep-dive)
+- [Geo indexing and optimizations](#geo-indexing-and-optimizations)
+- [APIs](#apis)
+- [Schema and storage choices](#schema-and-storage-choices)
+- [Ranking pipeline](#ranking-pipeline)
+- [Caching strategy](#caching-strategy)
+- [Metrics](#metrics)
+- [Tradeoffs](#tradeoffs)
+- [Bottlenecks, failures, mitigations](#bottlenecks-failures-mitigations)
+- [Reliability and observability](#reliability-and-observability)
+- [Bar-raiser follow-ups](#bar-raiser-follow-ups)
+- [60-second close](#60-second-close)
+
+---
+
+## Interview plan (first 90 seconds)
+
+Say something like:
+
+> “I’ll clarify what ‘homepage’ includes and freshness expectations, then state rough scale. I’ll propose APIs plus a small data model, sketch read-optimized architecture with **geo → candidates → rank → assemble**, then go **deep** on the **homepage read path** and how we degrade if ranking or spatial index is slow. I’ll pause after the sketch—is **ranking** or **geo** more important for you to stress-test?”
+
+**Alignment checkpoint** (after boxes): “Before I deep dive **ranking**, does this match your mental model of scope?”
+
+---
+
+## Strong-hire signals for this problem
+
+- You separate **eligibility** (must be correct) from **ordering** (best-effort under latency).  
+- You name **geohash boundary** expansion and **max scan cap** without being asked.  
+- You define **metrics** from **order facts** / OLAP, not from Redis alone.  
+- You give a **fallback** ranker path when the model times out.
+
+---
+
+## Coverage map
+
+Check these in the room (tick mentally):
+
+- [ ] User flows: first open, repeat user, bad GPS, saved address  
+- [ ] **Geo**: indexing, neighbors, dense-city hot cells  
+- [ ] **APIs**: home, nearby, search handoff, restaurant detail  
+- [ ] **Schema**: restaurant, dish, order line; denormalization for reads  
+- [ ] **SQL vs NoSQL vs search index** with **access pattern** justification  
+- [ ] **Caching** layers + invalidation + stampede risk  
+- [ ] **Ranking** signals, two-stage retrieve + re-rank, experiments  
+- [ ] **Metrics**: most ordered restaurant/dish, orders per restaurant  
+- [ ] **Failures**: ranker down, spatial shard hot, stale menu  
+
+---
+
+## Clarifying questions
+
+| Question | Why it matters |
+|----------|----------------|
+| What is **in** homepage: carousels, cuisines, reorder, promos? | Scope |
+| Location: GPS, saved address, IP fallback—**privacy** copy? | Geo pipeline |
+| Is list **inventory** eventual OK vs must match kitchen? | Consistency |
+| **P99** target for server work? | Cache depth |
+| Search same service or separate? | Ownership |
+| **Personalization** depth in v1? | Feature store scope |
+
+---
+
+## FR, NFR, invariant
+
+**Functional:** resolve serviceable restaurants; compose **sections**; cards show ETA/fee/rating/media; optional search delegation.
+
+**Non-functional:** read-heavy; **P99 latency** budget; high availability; **strong** correctness for “can deliver / open” at order time (browse may be softer); geo rules explicit.
+
+**Invariant (say aloud):** “We never show a restaurant as **orderable** if it fails **hard eligibility** (zone, paused, hard closure rules). **Ranking** can degrade; **eligibility** cannot lie.”
+
+---
+
+## Back-of-napkin scale
+
+Order-of-magnitude talk track (tune with interviewer):
+
+- **DAU** in a large city → peak lunch **homepage reads** in the **10k–100k RPS** range per region (illustrative).  
+- **Reads : writes** enormous—writes are orders/impressions.  
+- **Geo query:** hundreds to low thousands of **candidates** before rank cap.  
+- **Latency budget:** tens of ms in service after edge; **ranking** gets a **tight sub-budget** with timeout.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Client
+    App[Mobile / Web]
+  end
+  subgraph Edge
+    CDN[CDN / Image CDN]
+    GW[API Gateway]
+  end
+  subgraph HomepageSvc[Homepage]
+    Loc[Location Resolver]
+    Geo[Geo Candidates]
+    Rank[Rank + Mixer]
+    Asm[Assembler]
+  end
+  subgraph Data
+    Sp[(Spatial / GeoHash)]
+    Cat[(Catalog)]
+    Feat[(Features)]
+    Ord[(Orders / agg)]
+    Redis[(Redis)]
+  end
+  subgraph Async
+    K[Kafka]
+    OLAP[OLAP / rollups]
+  end
+  App --> CDN
+  App --> GW --> Loc --> Geo --> Sp
+  Geo --> Cat
+  Rank --> Feat
+  Rank --> Ord
+  Rank --> Redis
+  Asm --> Rank
+  GW --> Asm
+  App -->|events| K --> OLAP --> Ord
+```
+
+**Human narration:** “This is a **read funnel**: cheap **geo filter** widens to a capped set, then **expensive scoring** runs only on that set. Writes to orders stay on the **async** path feeding **aggregates**.”
+
+---
+
+## Critical path (deep dive)
+
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant G as Gateway
+  participant H as Homepage Svc
+  participant S as Spatial Index
+  participant R as Ranker
+  participant X as Catalog / Cache
+  C->>G: GET /home + location
+  G->>H: authorized request
+  H->>H: resolve + normalize location
+  H->>S: cells + neighbor query (cap N)
+  S-->>H: candidate restaurant IDs
+  H->>X: hydrate card fields (batch)
+  H->>R: score + mix (timeout T)
+  R-->>H: ordered IDs + debug scores
+  H-->>G: JSON sections + ETag
+  G-->>C: 200 + cache headers
+```
+
+**Step-by-step (say like a walkthrough):**
+
+1. **AuthN/Z** at gateway; attach **user** and **device**.  
+2. **Location resolver** picks coordinates; log which **source** was used.  
+3. **Spatial lookup:** geohash/H3 cells + **adjacent ring** until enough candidates or **distance cap**.  
+4. **Hard filters:** not hard-closed, in zone, basic compliance.  
+5. **Hydration:** batch fetch restaurant rows / cache; avoid N+1.  
+6. **Ranker:** two-stage—cheap score for K′, richer re-rank for K; **deadline** + **fallback ordering** (distance, popularity).  
+7. **Assembler:** sections, promos slots, **experiment** flags.  
+8. **Response:** **ETag**/version for **conditional** GET; CDN for images.
+
+**Races / edge cases:** menu changed mid-request—**version** on card; rank used **snapshot** of feature flags at request start.
+
+---
+
+## Geo indexing and optimizations
+
+- **Geohash / H3 / S2:** pre-index `restaurant_id → cell`; query **cell + neighbors** to fix **boundary** misses.  
+- **Optimization:** **max candidates** + **distance early exit**; **dense cell** splitting or **sub-zones** for hotspots.  
+- **Secondary:** “open now” as **bitmap** or **next open** field to avoid scanning closed venues in rank.
+
+---
+
+## APIs
+
+| API | Purpose |
+|-----|---------|
+| `GET /v1/home?lat=&lng=&addr_id=` | Full homepage |
+| `GET /v1/restaurants/nearby?cursor=` | Pagination |
+| `GET /v1/search?q=&lat=&lng=` | Often separate search service |
+| `GET /v1/restaurants/{id}` | Detail; menu may be chunked |
+
+---
+
+## Schema and storage choices
+
+**Sketch:** `Restaurant`, `Dish`, `Order`, `OrderLine` — orders are **relational**; menu can be **JSON/doc** per restaurant for flexible modifiers.
+
+| Store | Holds | Why |
+|-------|--------|-----|
+| OLTP SQL | Orders, money-adjacent state | ACID |
+| Document / wide JSON | Menu display blobs | Flexible schema |
+| Search index | Text + facets | Inverted index |
+| Redis | Hot lists, per-cell caches, rate limits | Speed |
+| OLAP / lake | Metrics, training data | Cheap scans |
+
+---
+
+## Ranking pipeline
+
+**Signals:** distance/ETA, CTR/CVR history, rating, business rules, inventory hints, user affinity.  
+**Offline + online:** batch aggregates to **feature store**; online **blend** + **re-rank**; reserve slots for **exploration**.  
+**Optimization:** **retrieve wide, rank narrow**; **precompute** heavy aggregates.
+
+---
+
+## Caching strategy
+
+| Layer | Content | Notes |
+|-------|---------|--------|
+| CDN | Images, static campaigns | Purge + TTL |
+| Edge/API cache | Section fragments | Short TTL; **vary by location bucket** |
+| Redis | Per-cell lists, featured sets | **Stampede:** single-flight / jitter |
+| App | Config, flags | Minutes |
+
+**Policy:** “Trending” can be **stale**; **open/closed** uses **short TTL** + version.
+
+---
+
+## Metrics
+
+1. **Most ordered restaurant** — fact table on `orders.restaurant_id`.  
+2. **Most ordered dish** — `order_lines.dish_id`.  
+3. **Orders per restaurant** — same; expose in BI + optional **Redis** for ops dashboards.
+
+**Strong hire:** “**Source of truth** is orders in OLTP → **stream** to warehouse; **cache** only for **read acceleration**, not definitions.”
+
+---
+
+## Tradeoffs
+
+| Decision | Upside | Downside |
+|----------|--------|----------|
+| Push heavy rank **online** | Fresher personalization | Tail latency risk |
+| More **Redis** on geo | Fast reads | Stale/incorrect if not invalidated |
+| Strong **inventory** on list | Trust | Harder scale; more joins |
+| Two-stage rank | Latency control | More moving parts |
+
+---
+
+## Bottlenecks, failures, mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| **Hot geocell** | Sub-partition; read replicas; cap + backoff |
+| Ranker **timeout** | Fallback sort; circuit breaker |
+| **Cache stampede** | Single-flight, TTL jitter, early refresh |
+| **Stale menu** | Version keys; short TTL on price |
+| Bad GPS | Explicit UX + saved addresses |
+
+---
+
+## Reliability and observability
+
+- **SLOs:** homepage **p99**, ranker **p95**, spatial **error rate**.  
+- **Tracing** span per stage (loc, geo, rank, assemble).  
+- **Alerts:** rank fallback rate, empty-cell rate, cache **miss storm**.  
+- **Load shed:** drop nonessential sections first.
+
+---
+
+## Bar-raiser follow-ups
+
+**Q: “How do you know ranking is not biased against new restaurants?”**  
+A: “**Exploration** slots + **cold-start** features; monitor **share of impressions** by tenure; separate **business** constraints from model.”
+
+**Q: “Multi-region?”**  
+A: “**Regional** datasets for catalog + spatial; **async** replication for analytics; user reads **local**; accept **eventual** for global aggregates unless specified.”
+
+**Q: “Search same index as nearby?”**  
+A: “Often **separate** inverted index with geo filter; same **restaurant id** space; **join** in application layer.”
+
+---
+
+## 60-second close
+
+“Homepage is a **read funnel**: **geo** produces a **capped** candidate set with **neighbor cells**; **ranking** is **time-boxed** with **fallback**; **catalog** hydrates in **batch**. **Orders** stay **ACID** in SQL; **metrics** come from **facts** streamed to **OLAP**; **Redis** is an accelerator with explicit **staleness** rules.”
