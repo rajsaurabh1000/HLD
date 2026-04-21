@@ -1,4 +1,4 @@
-# HLD — Uber Backend (Ride-Sharing Service)
+# HLD — Uber Backend / Ride-Sharing Service
 
 <a id="interview-spine-nine-steps"></a>
 
@@ -13,6 +13,8 @@
 **Thinking transitions:** *“**Matching** is usually its own service—I’ll treat **dispatch** as a **client** of this core unless you want it in-box.”* · *“**Accept** has to be **linearizable** enough that we don’t double-book a driver.”*
 
 **Live rule:** **Paraphrase** §1–2 tables; go deep **only if they probe**.
+
+**User journey (once):** say the [👤 User journey](#user-journey-framing) line **before** the architecture diagram for a **product** entry point.
 
 <a id="say-1-questions-human"></a>
 ### 1.1 Clarify
@@ -85,7 +87,7 @@
 1. “**Idempotent** `POST /trips`.”  
 2. “**Accept** is the **commit** boundary for driver assignment.”  
 3. “**Out-of-band** push (**FCM/APNs**) for state; **client polls** as backup.”  
-4. “**Saga** or **choreography** for cancel + payment reversal—define with interviewer.”
+4. “For **cancel + payment reversal**, I’d **default to saga orchestration** (a **Trip orchestrator** or **workflow engine** with **visible steps**, **compensation**, and **timeouts**)—not **pure choreography**—so we get **one place to observe** and **replay** partial failures. **Choreography** only if you explicitly want **loose coupling** and **no central coordinator**.”
 
 ---
 
@@ -140,6 +142,59 @@
 
 ---
 
+## 👤 User Journey (say once early)
+
+<a id="user-journey-framing"></a>
+
+**Say it once early** (before or right after the [architecture diagram](#4-high-level-architecture)):
+
+*“I think about this from the **user** perspective:
+
+**User opens app** → **requests a ride** → the system **creates a trip** → **matching** finds drivers → the user **gets an offer** → **accepts** → the **trip progresses** (driver en route → pickup → on trip → dropoff) → **completes** → **payment** is processed.
+
+So:
+- **Write path** = trip **creation** + **accept commit** (and other **durable** transitions like cancel when product requires it)
+- **Async path** = **matching** + **location** updates (push/stream—**not** blocking the user on every GPS tick)
+- **Read path** = **trip status** + **ETA**
+
+That maps cleanly to **Trip** owning the **contract**, **Matching** as **async propose**, and **Payments** at the **money boundary**.”*
+
+👉 **Intuitive** and **product-aware**—then draw **Trip** / **Matcher** / **Payments** on the board.
+
+---
+
+## 🔄 State Machine (anchor)
+
+<a id="state-machine-anchor"></a>
+
+**Say this clearly once:**
+
+**Trip is fundamentally a state machine**—all correctness is **valid transitions** only, not ad-hoc flags.
+
+**Typical chain (tune names with interviewer):**
+
+`REQUESTED` → `MATCHING` → `OFFERED` → `MATCHED` → `DRIVER_EN_ROUTE` → `ON_TRIP` → `COMPLETED`
+
+**Terminal:** `CANCELLED` from **only** the states your policy allows (rider/driver/system).
+
+**Invariant in the room:** *“No illegal jumps—every API maps to an **allowed** edge; **version** or **row lock** on **commit** edges like **accept**.”*
+
+You can **collapse** `MATCHING` / `OFFERED` for an MVP sketch—as long as you **forbid** ambiguous double-assign.
+
+---
+
+## 👤 UX Awareness
+
+<a id="ux-awareness"></a>
+
+**Connect reliability to what the user sees:**
+
+- If **matching** is slow or struggling, the rider sees **“Searching for drivers…”** (or product copy)—**not** a blank screen or a generic **500**. Offer **retry**, **edit pickup**, or **cancel and re-book** per product.  
+- **Degrade gracefully:** **re-match**, **expand search radius**, drop **non-critical** enrichment before failing the **whole** trip shell.  
+- **Driver:** if an **offer expires**, the UI shows a **stale offer** state and waits for a **fresh** push—**no** silent wrong-driver UX.
+
+---
+
 ## 4. High-level architecture
 
 <a id="say-voice-4"></a>
@@ -150,6 +205,7 @@
 | **Write** | “**Gateway** → **Trip** persists **REQUESTED** → publishes **TripRequested** → **Matching** workers search.” |
 | **Commit** | “**Matching** calls back **ReserveDriver** or **AcceptOffer** **transactionally** with **Trip**.” |
 | **Read** | “**ETA** and **map** from **location** pipeline; **trip** reads **denormalized** driver snippet.” |
+| **User journey** | “Same beat as [👤 User journey](#user-journey-framing): **open → request → trip created → offer → accept → progress → pay**.” |
 
 ```mermaid
 flowchart TB
@@ -178,7 +234,30 @@ flowchart TB
 |-------|------|
 | **1** | Linear state machine, single-region, sync accept |
 | **2** | Async matching queue, offer TTL, idempotent API |
-| **3** | Multi-region read replicas, **saga** for payment + cancel |
+| **3** | Multi-region read replicas, **orchestrated saga** (Trip-led) for payment + cancel |
+
+---
+
+## 🚗 Matching Deep Dive (if probed)
+
+<a id="matching-deep-dive-probed"></a>
+
+**When they push** *“How does matching actually work?”*—you still keep **Trip** as SoT; you **describe** the sibling service in **one tight block**:
+
+**Matching is typically:**
+
+- **Geo-partitioned** workers (shard by **cell / region**).  
+- **Fetch nearby drivers**: **spatial index** (cell + **neighbors**), filter by **product**, **online**, **not on active trip** (per policy).  
+- **Rank** by **ETA**, distance, **acceptance probability** / surge signals—**cap K** before expensive scoring.  
+- **Send offers** with a **short TTL**; **expire** stale offers so we never **commit** a dead assignment.  
+- **Iterate**: timeout → **re-offer** or **expand** radius with guardrails.
+
+**Important (say aloud):**
+
+- A **driver** can only **accept one** **committed** active trip (or whatever the **vehicle session** rule is)—**Trip service** enforces on **commit**.  
+- **Offers are short-lived** so **stale** “you have a driver” never lingers—ties to [👤 UX Awareness](#ux-awareness).
+
+👉 This closes a common **Bar Raiser** probe without pretending **matching** lives inside **Trip** unless they ask you to merge boxes.
 
 ---
 
@@ -188,6 +267,8 @@ flowchart TB
 #### Human interaction (deep dive)
 
 **Habit:** *“Walk **`POST /trips`** then **accept** like a sequence diagram.”*
+
+If they drill on **matching internals**, use [🚗 Matching Deep Dive (if probed)](#matching-deep-dive-probed)—then return to **Trip commit** boundaries here.
 
 <a id="bottleneck-anchor-once"></a>
 ### 🎯 Bottleneck Anchor
@@ -244,8 +325,8 @@ sequenceDiagram
 <a id="say-voice-7"></a>
 #### Human interaction (reliability)
 
-- **Partial outage matching:** trips stay **REQUESTED**; **retry** with backoff.  
-- **Payments timeout:** **outbox** pattern; **reconcile** job.  
+- **Partial outage matching:** trips stay **REQUESTED** / **MATCHING**; **retry** with backoff; rider stays in **“Searching…”** per [👤 UX Awareness](#ux-awareness).  
+- **Payments timeout:** **outbox** pattern; **reconcile** job; long-running **cancel + refund** flows **default to orchestrated saga** (central coordinator + **compensating** steps) so **partial failure** is **observable** and **replayable**.  
 - **Split brain:** prefer **single writer** per `trip_id` (leader partition).
 
 ---
@@ -275,7 +356,7 @@ sequenceDiagram
 
 | Pattern | Where |
 |---------|--------|
-| **Saga / outbox** | Trip + payment |
+| **Orchestrated saga + outbox** | Trip + payment (default over pure choreography) |
 | **State machine** | Trip lifecycle |
 | **Partition** | By region / trip_id |
 | **Queue** | Match workers |
@@ -309,6 +390,7 @@ sequenceDiagram
 |----------|------------------|
 | **Pool** | “Shared **pickup order** + **per-leg** fare allocation—still **one** trip aggregate or **parent/child** trips.” |
 | **Cross-region** | “Trip **home region** follows **rider legal** entity; **replicate read** elsewhere.” |
+| **“How does matching work?”** | “[Geo-partitioned workers → cap K → rank → TTL offers](#matching-deep-dive-probed); **Trip** still owns **accept commit**.” |
 
 ---
 
@@ -318,6 +400,6 @@ sequenceDiagram
 
 | Beat | Say it like this in the room |
 |------|------------------------------|
-| **Recap** | “**Trip service** owns **durable state machine**; **matching** **async** proposes; **accept** **txn** + **version**; **payments** **outbox**; scale **geo** + **queues**; **SLIs** on **offer latency** and **accept conflicts**.” |
+| **Recap** | “**User journey**: **open → request → trip → offer → accept → ride → pay**. **State machine** = valid edges only. **Trip service** owns **durable** lifecycle; **matching** **async** proposes (**geo workers**, **cap K**, **TTL offers**); **accept** **txn** + **version**; **payments** **outbox** + **orchestrated saga** for cancel/refund; **UX**: **searching** + **graceful degrade**; **SLIs** on **offer latency** and **accept conflicts**.” |
 
 ---
