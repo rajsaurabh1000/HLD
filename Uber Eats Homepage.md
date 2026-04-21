@@ -4,10 +4,20 @@
 
 ## 1. Clarify requirements
 
+### 1.0 Live flow (how to open and steer)
+
+<a id="live-flow-open"></a>
+
+**Opening (~once):** *“I’ll align on **homepage scope**, **location + trust**, rough **p99**; then **scale**, **APIs + ownership**, **architecture**, and **`GET /home`** end-to-end. I’ll **pause after the diagram**—does that sequencing work, and where do you want depth: **geo**, **rank**, or **cache**?”*
+
+**Thinking transitions** (use **between** topics so it feels like *design*, not *recital*): *“Let me think through …”* · *“One tradeoff here is …”* · *“If I optimize for latency I’d …”* · *“Let me sanity-check …”* · *“I’d start simple and evolve when …”*
+
+**Live rule:** **Paraphrase** §1–2 tables; don’t read every row. Deeper bullets = **only if they probe**.
+
 <a id="say-1-questions-human"></a>
 ### 1.1 Clarify 
 
-| Topic (from table above) | Say it like this in the room |
+| Topic | Say it like this in the room |
 |--------------------------|-------------------------------|
 | **What’s “homepage”?** | “When you say **homepage**, should I picture the **full** experience—**near you**, reorder, cuisine chips, promos, maybe **sponsored** slots—or are we intentionally **narrower**?” |
 | **Location + trust** | “For **location**, am I assuming **GPS + saved addresses**, and do we ever **fall back** to IP or coarse location? If we do, does the product need an explicit **disclosure** to the user?” |
@@ -26,6 +36,8 @@
 #### Human interaction (FR — how to explain after alignment)
 
 **Habit:** *“Once scope is clear, here’s what I think we’re building—in plain terms.”*
+
+**Live:** one **spoken** pass from the table (~60–90 s); use **thinking transitions** from [§1.0](#live-flow-open) when you move from FR → NFR.
 
 | FR area | Say it like this in the room |
 |---------|-------------------------------|
@@ -88,6 +100,12 @@
 | **Cost** | “**CDN** for images; **denormalized** read models so we’re not joining the world on every home load.” |
 | **Compliance** | “**Disclose** coarse location when we use it; **residency** for PII/logs if multi-region matters.” |
 
+#### UX on the read path (say with NFR)
+
+- **Rank / mixer sick:** user still gets **eligible** restaurants in **fallback order**—not a blank home.  
+- **Personalization rails down:** ship **generic + trending**; **drop** promos before **near you**.  
+- **GPS noisy:** **prefer saved address** when available; **disclose** coarse/IP fallback when product requires it.
+
 **Performance and latency**
 
 - **Read-heavy** workload; homepage path should avoid **O(n)** work on unbounded **n**.  
@@ -144,6 +162,19 @@
 | **Core split (once)** | Same as [Key insight (say early)](#key-insight-say-early)—who’s **allowed** vs **order** under latency. |
 | **Checkout tie-in (one line)** | “Anything that implies **you can place this order** might need a **stricter** read at menu or checkout—we can align.” |
 
+<a id="key-insight-say-early"></a>
+### Key insight (say early—one sentence)
+
+**Who is allowed on the page** (hard eligibility—in zone, not hard-closed) is **not** the same as **in what order** they appear (ranking, cache, experiments). Ranking may **degrade**; eligibility must not **lie** about serviceability.
+
+#### Key anchors (say these confidently—any order)
+
+1. “**Eligibility** stays correct; **ranking** can degrade.”  
+2. “**Cell + neighbors** so boundary users aren’t wrong.”  
+3. “We **cap candidates** before expensive scoring.”  
+4. “**Ranking is time-boxed** with **fallback**.”  
+5. “**Metrics** from **order facts / OLAP**—cache only **mirrors** with known lag.”
+
 ---
 
 ## 2. Estimate scale
@@ -154,6 +185,8 @@ Order-of-magnitude talk track (tune with interviewer):
 #### Human interaction (estimate scale)
 
 **Habit:** *“I’ll throw round numbers—correct me if your mental model’s different; I only need the **shape**.”*
+
+**Live:** *“Let me sanity-check scale before I draw boxes…”* then **3–4 numbers** + **invite correction**—skip the full dimension table unless they want math.
 
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
@@ -240,6 +273,7 @@ Order-of-magnitude talk track (tune with interviewer):
 | **Zoom out** | “Client hits **CDN** for images, **gateway** for policy, then a **home service** that’s basically **locate → geo candidates → filter → rank → assemble**.” |
 | **Data row** | “Behind that: **spatial index**, **catalog**, **features**, hot stuff in **Redis**, **orders** feeding **Kafka → OLAP** for aggregates—not on the critical read path.” |
 | **Checkpoint** | “Before I sequence **`GET /home`**, does this **split** match how you think about **team ownership**?” |
+| **Steer** | “**Should I go deeper** on **geo**, **ranking**, or **cache** next—or **failure modes** on this diagram?” |
 
 ```mermaid
 flowchart LR
@@ -280,6 +314,16 @@ flowchart LR
 
 **Human narration:** “This is a **read funnel**: cheap **geo filter** widens to a capped set, then **expensive scoring** runs only on that set. Writes to orders stay on the **async** path feeding **aggregates**.”
 
+### 4.1 How we’d evolve this (if they ask “phases / MVP”)
+
+| Phase | Ship | Why |
+|-------|------|-----|
+| **1 — MVP** | **Geo filter** + **simple rank** (distance + rating/popularity) + **aggressive cache** + honest **staleness** labels | Trust + learn traffic shape |
+| **2 — Growth** | **Feature** rank, **personalization** rails, **hot-cell** handling, **stream** aggregates for trending | Engagement without uncapped work |
+| **3 — Scale** | **Multi-region** reads, heavier **rank + experiments**, **dense-city** tuning (sub-cells, stricter caps, rank pools) | Tail + org maturity |
+
+**Taking a stance:** *“I’d ship **phase 1** with strict **eligibility** and **capped** geo; I’d only pay for **phase 3** complexity when metrics prove we need it.”*
+
 ---
 
 ## 5. Deep dive: critical flow
@@ -298,8 +342,11 @@ flowchart LR
 | **Assemble & respond** | “**Mixer** for promos/experiments; **ETag** / CDN for repeat visits.” |
 | **Cache policy** | “**Trending** can be stale; **open/closed** shorter **TTL** + **version**; cache is never **source of truth** for business metrics—same as the **§5.4** table above.” |
 | **Anchor** | “The main bottleneck I see here is **\_\_\_**—**hot cell**, **rank tail**, or **stampede**—that’s what I’d instrument first.” |
+| **Production voice** | “**Stampede** when a hot **cell TTL** expires—**single-flight + jitter**; **rank p99** at lunch—**deadline + fallback**; **bad GPS**—**saved address** + **log source**.” |
 
 This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
+
+**Taking a stance (geo + rank):** *“I’d default **cell + neighbors + cap** on something **Redis-friendly** for read **p99**; I’d **revisit PostGIS** if polygons/joins outgrow the cell model. For rank: **two-stage** + **partial precompute**, **time-box** online scoring—**more precompute** only if product proves we need fresher rails without blowing **p99**.”*
 
 ```mermaid
 sequenceDiagram
@@ -411,6 +458,7 @@ sequenceDiagram
 | **Partial success** | “Personalization dies → **partial homepage** beats a **500**; I shed **promos** before **near you**.” |
 | **Retries** | “Retry only **idempotent** reads, **backoff + cap**—no **retry storms**.” |
 | **Interrupted** | “If you cut in—same design, just more ruthless on **caps** and **deadlines**.” |
+| **Incident tone** | “In prod I’ve seen **stampede** on viral tiles, **hot geocells** starving a shard, and **rank tail**—same mitigations: **jitter**, **sub-partition**, **breaker + fallback**.” |
 
 ### 7.1 Dependency behavior
 
@@ -422,6 +470,8 @@ sequenceDiagram
 
 - Return **partial homepage** (drop heavy rails) rather than **500** when a noncritical dependency fails.  
 - **Load shed:** prioritize **near you** + **eligibility** over **personalization** blocks under pressure.
+
+**UX tie-in (say aloud):** *“Ranking down ≠ empty page—we still show **eligible** venues in **fallback** order. Personalization down ≠ broken **trust**—we **shed** fancy rails first.”*
 
 ### 7.3 Data and correctness failures
 
@@ -447,6 +497,8 @@ sequenceDiagram
 | **Freshness vs latency** | “I’m OK if **browse** is a little **stale** if **p99** stays happy; I’m not OK being **wrong** about serviceability.” |
 | **Online rank vs precompute** | “More **online** rank → fresher but **tail risk**; more **precompute** → stable latency but **pipeline** work.” |
 | **Store / service forks** | “PostGIS vs Redis GEO vs search geo; BFF **monolith** vs split services—I’d pick based on **ops maturity**, **team boundaries**, and **who can own** incidents.” |
+| **My default (geo)** | “**Cell + neighbors + cap** on a **fast** spatial store for v1; **PostGIS** when polygon/reporting needs force it.” |
+| **My default (rank)** | “**Two-stage** + **deadline + fallback**; add **precompute** when freshness **proves** worth the **pipeline** cost.” |
 
 ### 8.1 Product / system tradeoffs
 
@@ -580,6 +632,8 @@ Uber **HLD** rewards **distributed-systems** thinking; classic **GoF** still app
 
 **Habit:** *“Pattern names are shorthand for behavior—**one** name per beat, tied to **where** on the board.”*
 
+**Live:** pick **at most four** patterns on the diagram; *“Does that naming match how you’d split ownership?”* then stop.
+
 | You mean… | Say it like this in the room |
 |-----------|-------------------------------|
 | **Distributed patterns** | “**Gateway** = policy surface; **BFF** = shape payload; **breaker/bulkhead** = ranker sick doesn’t take down the world; **cache-aside** + **CQRS-lite** = reads vs writes; **Kafka** = metrics off the hot path.” |
@@ -591,7 +645,20 @@ Uber **HLD** rewards **distributed-systems** thinking; classic **GoF** still app
 
 ## Closing notes (where wrap-up human interaction lives)
 
-Endgame is **short**, **confident**, and **conversational**: use the **`#### Human interaction`** blocks under [Bar-raiser](#bar-raiser-follow-ups), [Communication](#communication-do-vs-avoid), and [60-second close](#60-second-close)—not a second full design pass.
+Endgame is **short**, **confident**, and **conversational**: use the **`#### Human interaction`** blocks under [Bar-raiser](#bar-raiser-follow-ups), [Communication (do vs avoid)](#communication-do-vs-avoid), and [60-second close](#60-second-close)—not a second full design pass.
+
+<a id="communication-do-vs-avoid"></a>
+### Communication (do vs avoid)
+
+| Do (sounds senior) | Avoid (sounds rehearsed) |
+|--------------------|---------------------------|
+| **Narrate intent** before boxes | Dumping names with no story |
+| **Ask** where to go deeper | Assuming the whole hour is one thread |
+| **Reflect back** after clarify | Fifteen questions with no pause |
+| **Default + caveat** | “We could do A, B, or C…” with no pick |
+| **Time-box** your own talking | Finishing every subsection because it exists in the doc |
+
+**60-minute sketch (flex):** clarify+FR+NFR ~8–12 · scale+APIs ~8–12 · architecture ~8–12 · **deep dive ~15–22** · scale→monitoring ~10–15 · patterns+close ~5–8.
 
 ---
 
