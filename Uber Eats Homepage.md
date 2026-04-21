@@ -1,351 +1,41 @@
 # HLD — Uber Eats Homepage
 
-> **GitHub README style:** use this as a single scrollable brief—diagrams render in GitHub’s markdown preview. Practice **out loud** using [HLD-README.md](./HLD-README.md) for the global “Strong Hire” playbook.
-
-| | |
-|--|--|
-| **Round** | 45–60 min · Bar Raiser favorite |
-| **Strong-hire hooks** | Geo correctness + boundary cells, ranking **timeouts + fallback**, cache **freshness vs SLO**, metrics from **facts** not cache |
-
----
-
-## Table of contents
-
-**Prep (before whiteboard)**
-
-- [How to drive the round (natural conversation)](#how-to-drive-the-round-natural-conversation)
-- [Key insight (say early)](#key-insight-say-early)
-- [Interview plan (first 60-90 seconds)](#interview-plan-first-60-90-seconds)
-- [SDE-2 drive kit (Senior interviewer)](#sde-2-drive-kit-senior-interviewer)
-- [Strong-hire signals for this problem](#strong-hire-signals-for-this-problem)
-- [Coverage map](#coverage-map)
-
-**Interview spine (follow this order in the room)**
-
-- [Interview spine (nine steps)](#interview-spine-nine-steps)
-- [1. Clarify requirements](#1-clarify-requirements)
-- [2. Estimate scale](#2-estimate-scale)
-- [3. APIs and data model](#3-apis-and-data-model)
-- [4. High-level architecture](#4-high-level-architecture)
-- [5. Deep dive: critical flow](#5-deep-dive-critical-flow)
-- [6. Scaling and bottlenecks](#6-scaling-and-bottlenecks)
-- [7. Reliability and failure handling](#7-reliability-and-failure-handling)
-- [8. Tradeoffs and alternatives](#8-tradeoffs-and-alternatives)
-- [9. Monitoring, observability, and security](#9-monitoring-observability-and-security)
-- [10. Design patterns, data structures & best practices](#10-design-patterns-data-structures--best-practices)
-
-**Wrap-up**
-
-- [Bar-raiser follow-ups](#bar-raiser-follow-ups)
-- [Strong Hire room checklist](#strong-hire-room-checklist)
-- [Communication: DO vs AVOID](#communication-do-vs-avoid)
-- [60-second close](#60-second-close)
-- [Honest rating: can you drive from this doc?](#honest-rating-can-you-drive-from-this-doc)
-
----
-
-## How to drive the round (natural conversation)
-
-**Rating (honest):** if you deliver the *ideas* in this file with **structure + pauses**, you are in **Strong Hire** territory for a typical Uber HLD homepage prompt. The risk is sounding **memorized**—so use this doc as a **skeleton**, then **paraphrase** like you are explaining to a teammate.
-
-### Skeleton vs speech
-
-| Skeleton (from this doc) | How it should sound in the room |
-|---------------------------|----------------------------------|
-| Fixed paragraphs | Same **logic**, your **words** |
-| One long monologue | **Layers**: geo → *pause* → ranking → *pause* → cache |
-| Every buzzword | Plain English first, **one** precise term where it earns its keep |
-
-**Rule of thumb:** if you can say the same thing **three different ways**, you are safe from “scripted.”
-
----
-
-### Opening — robotic vs human
-
-**Sounds like a memorized speech (avoid):**
-
-> “I will clarify requirements and assumptions, then estimate scale briefly. After that I will define APIs and data model…”
-
-**Sounds like a real senior IC (aim here):**
-
-> “Happy to take this wherever you want—but here’s how I’d run the next forty minutes if that works. I’d like to **nail down scope** first—what counts as homepage, how tight inventory has to be—then do a **quick scale pass** so we’re not designing in a vacuum. Then I’d put **APIs and a thin data model** on the board, sketch the **read path**, and probably spend the most time on **geo + ranking** because that’s where latency and correctness usually fight. We can end on **tradeoffs and what breaks**.”
-
-**Then actually stop:**
-
-> “Does that work on your side? And if you already care about one slice—like **multi-region** or **experiments**—tell me now and I’ll weight that.”
-
----
-
-### Sample back-and-forth (first few minutes)
-
-Use this to **feel** the rhythm—not to memorize line by line.
-
-**Interviewer:** “Go ahead.”
-
-**You:** “Cool. When you say homepage, I’m picturing the usual rails—**near you**, maybe **reorder**, **trending**, **promos**, maybe a bit of **personalization**. Is that roughly what you have in mind, or is this intentionally narrower?”
-
-**Interviewer:** “That’s fine.”
-
-**You:** “Great. Two things I want to align on because they change the design. **One:** on the **list** itself, is it okay if popularity or ‘open now’ is **a little stale**—like tens of seconds or a couple minutes—or do you want that basically **real time**? **Two:** are we pretending **search** is in scope, or is that a **different** service and we just link out?”
-
-**Interviewer:** “Staleness is okay on browse.”
-
-**You:** “Perfect—that lets me be **aggressive on caching** and on **precomputed** scores without feeling guilty. I’ll still keep **hard eligibility**—like actually in zone and not hard-closed—much tighter, because that’s the kind of thing that turns into a trust issue if we’re wrong.”
-
-That last beat is your **eligibility vs ranking** split, but **woven into** a normal sentence.
-
----
-
-### Clarifying — short spoken lines (pick what fits)
-
-Say these like questions, not an interrogation:
-
-- “For **browsing**, are we okay with **eventual** freshness on things like trending, or do you want that tighter?”  
-- “Roughly where’s **p99** supposed to land for the **server side**—are we talking **sub‑100ms** or more like **hundreds of ms**?”  
-- “Is **personalization** in scope for v1, or generic + trending for now?”  
-
----
-
-### Read pipeline — say it while you draw (one breath)
-
-You do not need perfect wording. Any of these is fine:
-
-- “Big picture it’s a **pipeline**: figure out **where** the user is, pull a **candidate set** from geo, **filter** what’s actually allowed, **score** what’s left, **assemble** the page.”  
-- “Think **funnel**: wide at geo, narrow by the time we hit the ranker.”
-
----
-
-### Geo — how a human says the strong part
-
-Do not dump H3 *and* geohash *and* S2 unless they ask. One clear version:
-
-> “I’d bucket the world into **cells**—geohash or H3, either way—and pull restaurants from **this cell plus the ring around it**, because otherwise you always lose people who are **right on the edge**. In a **dense** downtown I’d also **cap** how many candidates we even send to ranking, otherwise we’re doing heavy work on thousands of rows for no reason.”
-
----
-
-### Data, cache, metrics — one layer at a time
-
-**Data (when they ask where things live):**
-
-> “Orders and anything **money-ish** I’d keep **relational**. Menus are messy—I’m fine with **documents** or fat JSON for the **read model**. Text search is almost always its **own index**.”
-
-**Cache (when it comes up—don’t lead with Redis):**
-
-> “Images obviously **CDN**. For the hot ‘near you’ lists I’d use something fast like **Redis**, but I care more about **TTL + invalidation** than the brand name. If we see stampedes we’d do **single-flight** and **jitter**.”
-
-**Metrics (say it like you mean it):**
-
-> “If we’re talking **most ordered restaurant** or **top dishes**, I’d treat **orders in the warehouse** as truth—**Kafka out of OLTP**, **OLAP**—and maybe **mirror** a denormalized number for speed, but I wouldn’t let **Redis be the definition** of the metric.”
-
----
-
-### The five ideas — say them *your* way (same truth, different words)
-
-You do not need all five every time; **land them once each** somewhere natural.
-
-| Idea | One natural way to say it |
-|------|---------------------------|
-| **Eligibility vs ranking** | “I’m strict about **who’s allowed on the list**; I’m flexible about **the order** if we’re up against latency.” |
-| **Neighbor cells** | “I always pull **neighbors**, otherwise geo feels ‘random’ near cell boundaries.” |
-| **Time-boxed rank + fallback** | “Ranking gets a **budget**; if we blow it we **degrade** to something dumb but safe—distance, popularity.” |
-| **Cap candidates** | “Especially downtown, I’d **cap** candidates before we do anything expensive.” |
-| **Metrics from facts / OLAP** | “**Business numbers** come from **orders in analytics**, not from whatever happened to be in cache.” |
-
----
-
-### When they interrupt (stay structured, sound calm)
-
-**“What if traffic 10x?”**
-
-> “Same shape—**more partition-friendly reads**, **more cache**, and I’d be ruthless about **capping** geo candidates and **time-boxing** rank. The **eligibility rules** don’t change; we just get cheaper at applying them.”
-
-**“Multi-region?”**
-
-> “I’d try to keep **user reads local** to a region, accept **eventual** for global aggregates unless you tell me otherwise, and be careful anything **ranking** uses is **consistent enough** for the SLO we picked.”
-
-**“Consistency?”**
-
-> “I’d split it: **browse** can be **softer**; anything that implies **you can actually place this order** has to be **tighter**—that’s where I’d use **stronger reads** or **version checks** at checkout even if the homepage is looser.”
-
----
-
-### Wrap-up — conversational (30–90 seconds)
-
-Pick your speed; do not rush.
-
-> “Yeah—so net net, homepage for me is a **read-heavy funnel**. **Geo + hard filters** are where I refuse to be sloppy; **ranking** is where I spend money but with a **timeout** and a **fallback**. We scale with **partitioning**, **caching**, and **not doing dumb work** on huge candidate sets. And anything we call a **business metric** should trace back to **orders**, not cache.”
-
----
-
-## Key insight (say early)
-
-You can say the formal version **or** the casual version—same signal.
-
-**Formal:**
-
-> “I split **eligibility** from **ranking**: who’s **allowed** vs how we **sort**. Eligibility has to stay **right**; ranking can **degrade** under pressure.”
-
-**Over coffee:**
-
-> “I’m not willing to be wrong about **‘can this restaurant actually serve you’**; I *am* willing to be a little wrong about **‘is it third or fifth on the list’** if the clock is yelling at me.”
-
----
-
-## Interview plan (first 60-90 seconds)
-
-Default: use the **human opening** in [How to drive the round](#how-to-drive-the-round-natural-conversation) (section **Opening — robotic vs human**).
-
-**Shorter variant** if time is tight:
-
-> “I’ll clarify scope and scale, sketch APIs and storage, draw the read pipeline, then go deep on **geo + ranking + failure modes**—does that work for you?”
-
-**Alignment checkpoint** (after architecture sketch): “Before I go deeper on **ranking**, does this match how you’re thinking about scope?”
-
----
-
-## SDE-2 drive kit (Senior interviewer)
-
-Use this with [How to drive the round](#how-to-drive-the-round-natural-conversation) (tone) + [nine-step spine](#interview-spine-nine-steps) (structure). **Paraphrase**; do not sound like a script.
-
-### A. Lock the room in 30 seconds
-
-1. Say your **plan** (clarify → scale → model → diagram → **read path deep dive** → scale/failures → monitoring).  
-2. **Stop talking**: “Does that sequencing work—and is there anywhere you want **extra** depth?”  
-3. If they say “ranking” or “geo,” mentally **star** that for §5.
-
-### B. Questions to ask — **this order** (skip only if they already answered)
-
-| # | Ask exactly (intent) |
-|---|----------------------|
-| 1 | “What counts as **homepage** for this prompt—nearby only, or also reorder / trending / promos?” |
-| 2 | “For **browsing**, how stale can **trending / popularity** be—seconds, minutes?” |
-| 3 | “What **p99** server latency should I assume for the home payload?” |
-| 4 | “Is **search** in scope or a **separate** service we integrate with?” |
-| 5 | “**Personalization** in v1 or generic rails first?” |
-| 6 | “**Location** sources—GPS, saved address, IP fallback—and any **disclosure** rules?” |
-| 7 | “Any **hard** rules on **open / in-zone / paused** that must never be wrong on the list?” |
-| 8 | “**Multi-region** or single-region mental model?” |
-| 9 | “**Experiments** on ranking—should I reserve a **mixer** slot?” |
-
-**After each answer:** one sentence **“So that means for design I will …”** (forces alignment).
-
-### C. What to explain — **this order** (one winning sentence per beat)
-
-| Spine | Land this sentence (then details only if they nod) |
-|-------|---------------------------------------------------------|
-| 1 | “I separate **eligibility** (who may appear) from **ranking** (order under latency).” |
-| 2 | “This is **read-heavy**; I’ll assume **high RPS** and **tight p99**, so I **cap** work per request.” |
-| 3 | “**APIs** are thin; **orders** stay relational; **menus** are read-shaped documents; **search** is its own index.” |
-| 4 | “Draw a **funnel**: location → geo candidates → filter → rank → assemble.” |
-| 5 | “**Geo** = cell + **neighbors** + **cap**; **rank** = two-stage + **timeout + fallback**; **hydrate** in batch.” |
-| 6 | “Hot risks: **dense cell**, **rank tail**, **stampede**—each has a mitigation.” |
-| 7 | “I **degrade** sections and **time-out** rank before I violate **eligibility** correctness.” |
-| 8 | “Trade **freshness** on browse for **latency**; never trade **wrong in-zone** for speed.” |
-| 9 | “**Metrics** = **order facts → Kafka → OLAP**; Redis is **not** the definition of revenue truth.” |
-
-### D. Whiteboard sequence (reduces “random boxes”)
-
-1. **Client → Gateway → Home service** (one row).  
-2. Under Home: **Location | Geo | Filter | Rank | Assemble** (pipeline).  
-3. Data row: **Spatial | Catalog | Features | Redis | Kafka→OLAP**.  
-4. **One** sequence diagram on **`GET /home`**.  
-5. Only then deep boxes for **rank** or **geo** if pushed.
-
-### E. Senior / Bar Raiser probes — **answer in 2–4 sentences**
-
-| They say / ask | You answer |
-|----------------|------------|
-| “Why not SQL for everything?” | “**Orders** need joins and invariants → SQL. **Menu read shape** is flexible and denormalized → document/JSON or Mongo for velocity; not a dogma.” |
-| “Consistency?” | “**Tiered**: hard **eligibility** stricter; list **ranking** eventual; checkout can be **stronger** than browse if product ties them.” |
-| “Ranking fairness / new stores?” | “**Exploration** slots + cold-start features; monitor **impression share** by tenure; separate **business** constraints from the model.” |
-| “Cache invalidation?” | “**Versioned** keys for catalog; short TTL for **open/closed**; **event** driven for menu; **never** infinite TTL on price.” |
-| “What if ranker is down?” | “**Timeout** then **fallback** order; still respect **eligibility**; monitor **fallback rate**.” |
-| “What if geo index is wrong?” | “**Neighbor expansion** + **max scan**; **cross-check** distance on final shortlist if needed (cost tradeoff).” |
-| “Multi-region?” | “**Regional** reads for catalog/geo; **eventual** global aggregates; avoid **split brain** on writes with clear ownership.” |
-| “Security?” | “**AuthZ** on user data; **rate limits**; minimal **PII** in logs; **signed** URLs for media.” |
-| “How do you test this?” | “Contract tests on **eligibility**; load tests on **geo cap** + rank **deadline**; chaos on ranker timeout.” |
-
-### F. If time is short (pick **two** deep dives only)
-
-Default: **(1) geo + eligibility** and **(2) rank timeout + fallback**. Say: “If we only have time for two deep dives, I’ll do **geo** and **ranking**—cool?”
-
-### G. Staff-level phrases (sprinkle, do not stack)
-
-- “The **latency budget** forces…”  
-- “I’d **time-box** this stage…”  
-- “The **invariant** I’m protecting is…”  
-- “I’d **instrument** fallback rate because…”
-
-### H. Anti-patterns (Senior IC will downgrade)
-
-- Leading with **Redis/Kafka** before **problem shape**.  
-- **No** eligibility vs ranking split.  
-- **No** neighbor cells / cap on geo.  
-- Metrics “from **cache**” as **definition**.  
-- **No** pause for alignment—monologue for 25 minutes.
-
----
-
-## Strong-hire signals for this problem
-
-- You separate **eligibility** (must be correct) from **ordering** (best-effort under latency).  
-- You name **geohash boundary** expansion and **max scan cap** without being asked.  
-- You define **metrics** from **order facts** / OLAP, not from Redis alone.  
-- You give a **fallback** ranker path when the model times out.
-
----
-
-## Coverage map
-
-Check these in the room (tick mentally):
-
-- [ ] Walk the [nine-step spine](#interview-spine-nine-steps) in order (do not skip to boxes first)  
-- [ ] User flows: first open, repeat user, bad GPS, saved address  
-- [ ] **Geo**: indexing, neighbors, dense-city hot cells  
-- [ ] **APIs**: home, nearby, search handoff, restaurant detail  
-- [ ] **Schema**: restaurant, dish, order line; denormalization for reads  
-- [ ] **SQL vs NoSQL vs search index** with **access pattern** justification  
-- [ ] **Caching** layers + invalidation + stampede risk  
-- [ ] **Ranking** signals, two-stage retrieve + re-rank, experiments  
-- [ ] **Metrics**: most ordered restaurant/dish, orders per restaurant  
-- [ ] **Failures**: ranker down, spatial shard hot, stale menu  
-
----
-
-## Interview spine (nine steps)
-
-Drive the hour in this order; each section below is numbered the same way.
-
-| Step | What you deliver | Section |
-|------|------------------|---------|
-| **1** | Clarify requirements | [§1](#1-clarify-requirements) |
-| **2** | Estimate scale | [§2](#2-estimate-scale) |
-| **3** | APIs / data model | [§3](#3-apis-and-data-model) |
-| **4** | High-level architecture | [§4](#4-high-level-architecture) |
-| **5** | Deep dive critical flow | [§5](#5-deep-dive-critical-flow) |
-| **6** | Scaling / bottlenecks | [§6](#6-scaling-and-bottlenecks) |
-| **7** | Reliability / failure handling | [§7](#7-reliability-and-failure-handling) |
-| **8** | Tradeoffs / alternatives | [§8](#8-tradeoffs-and-alternatives) |
-| **9** | Monitoring / security | [§9](#9-monitoring-observability-and-security) |
-
----
+<a id="interview-spine-nine-steps"></a>
 
 ## 1. Clarify requirements
 
-### 1.1 Questions to ask first (conversation, not a checklist attack)
+<a id="say-1-questions-human"></a>
+### 1.1 Clarify 
 
-| Question | Why it matters |
-|----------|----------------|
-| What is **in** homepage: carousels, cuisines, reorder, promos, sponsored rails? | Scope |
-| Location: GPS, saved address, IP fallback—**disclosure** and **privacy**? | Geo pipeline + trust |
-| Is **list** / browse inventory allowed to be **eventually** consistent vs kitchen real-time? | Cache + NFR |
-| **Latency**: target **p99** for server work (e.g. &lt;100ms vs 200–300ms)? | Rank budget + caching |
-| Is **text search** in scope or owned by a **separate** search team? | API boundaries |
-| **Personalization** depth in v1 vs generic + trending? | Feature store + complexity |
-| **Multi-region** or single-region exercise? | Replication story |
-| **Experiments** / A-B on ranking in scope? | Mixer + assignment |
+| Topic (from table above) | Say it like this in the room |
+|--------------------------|-------------------------------|
+| **What’s “homepage”?** | “When you say **homepage**, should I picture the **full** experience—**near you**, reorder, cuisine chips, promos, maybe **sponsored** slots—or are we intentionally **narrower**?” |
+| **Location + trust** | “For **location**, am I assuming **GPS + saved addresses**, and do we ever **fall back** to IP or coarse location? If we do, does the product need an explicit **disclosure** to the user?” |
+| **Browse freshness** | “For the **list** itself—not checkout—how **live** do things need to feel? Is it okay if **trending** or popularity is **a little stale**—seconds or minutes—or does the business want that basically **real-time**? That drives how hard I lean on **cache**.” |
+| **p99 budget** | “Roughly where should I put **server-side p99** for the home payload—**sub-100ms** territory, or more like **a few hundred ms**? I need that to know how much **ranking budget** is realistic.” |
+| **Search boundary** | “Is **text search** in scope for this design, or should I treat it as a **separate** service and we mostly **link** out?” |
+| **Personalization** | “For **v1**, do you want real **personalization** rails, or is **generic + trending** enough? That changes whether I’m pretending there’s a **feature store** on the hot path.” |
+| **Region model** | “Should I assume **multi-region** from day one, or is **single-region** the right mental model for this exercise?” |
+| **Experiments** | “Do we need to reserve space for **A/B or experiments** on ranking—like a **mixer** slot—or is ranking **static** for now?” |
+
+**Micro-pauses:** after one or two questions, **reflect back**: *“So if staleness is fine on browse, I can be more aggressive on cache—got it.”*
 
 ### 1.2 Functional requirements (FR) — after alignment, say this as “what we must build”
+
+<a id="say-fr-human"></a>
+#### Human interaction (FR — how to explain after alignment)
+
+**Habit:** *“Once scope is clear, here’s what I think we’re building—in plain terms.”*
+
+| FR area | Say it like this in the room |
+|---------|-------------------------------|
+| **Location & eligibility** | “We resolve **where** the user is, then only surface restaurants that are **actually serviceable** for that context—in zone, not hard-closed, not paused—whatever your business rules call ‘eligible’.” |
+| **Homepage shape** | “The response is a **structured page**: sections like reorder, **near you**, promos, cuisine chips—each has a **type**, title, items, and **pagination** where the list is long.” |
+| **Cards** | “Each **card** carries enough to decide to tap in—name, hero image, rating, ETA or distance, fees, **open / opens-at**, tags, and an id so **detail** is a clean handoff.” |
+| **Search boundary** | “I’m either **delegating** search to a dedicated service or keeping a **minimal** typeahead in scope—I’ll call which one I’m assuming so we don’t blur boundaries.” |
+| **Personalization & promos** | “If we have personalization, it’s **user-specific** rails; **sponsored** stuff goes through a **mixer** so we never break the same **eligibility** rules.” |
+| **Events** | “Impressions and clicks are **async**—they’re for analytics and ranking feedback, not on the critical read path.” |
+| **Out of scope** | “I’m **not** designing checkout or dispatch here—only how the homepage **hands off** if the product ties list freshness to ordering.” |
 
 **Location and serviceability**
 
@@ -380,7 +70,23 @@ Drive the hour in this order; each section below is numbered the same way.
 - **Checkout**, payment, cart—only mention as **tighter consistency** handoff.  
 - **Driver dispatch**—not homepage.
 
+
 ### 1.3 Non-functional requirements (NFR) — say as “how it must behave”
+<a id="say-nfr-human"></a>
+#### Human interaction (NFR — how to say “how it must behave”)
+
+**Habit:** *“Separate what has to feel ‘true’ from what can be ‘good enough’ for browse.”*
+
+| NFR area | Say it like this in the room |
+|----------|-------------------------------|
+| **Performance** | “This path is **read-heavy**—I want an explicit **latency budget** per stage so we never do **unbounded** work per request.” |
+| **Availability** | “If something non-critical is slow, I’d rather **drop a rail** or simplify than **500** the whole homepage.” |
+| **Consistency (tiered)** | “I’m stricter on **hard eligibility** than on **rank order** or trending freshness—browse can be **softer**; ‘you can order’ can’t be misleading.” |
+| **Orders / facts** | “**Orders** stay **durable** in OLTP—that’s what backs metrics and training; any write from this surface needs **idempotency** if we touch it.” |
+| **Scale** | “**Stateless** tier out front; **partition** geo and catalog by region; scale for **peak** lunch/dinner.” |
+| **Change safety** | “**Feature flags**, cache **versioning**, maybe **dark launch** on rank so we don’t surprise users.” |
+| **Cost** | “**CDN** for images; **denormalized** read models so we’re not joining the world on every home load.” |
+| **Compliance** | “**Disclose** coarse location when we use it; **residency** for PII/logs if multi-region matters.” |
 
 **Performance and latency**
 
@@ -423,15 +129,38 @@ Drive the hour in this order; each section below is numbered the same way.
 - **Location** handling and user-visible **disclosure** when coarse location used.  
 - **Data residency** if multi-region (where PII and logs live).
 
+
 ### 1.4 Invariants (one sentence you repeat under pressure)
 
 **Invariant:** “We never present a restaurant as **orderable** (or equivalently **misleadingly in-service**) if it fails **hard eligibility** for that user context. **Ranking** may **degrade** or reorder; **eligibility** cannot **lie**.”
+
+<a id="say-voice-1"></a>
+
+**Purpose:** no second “clarify lecture”—only the **handoff** from answers → design.
+
+| Beat | Say it like this |
+|------|------------------|
+| **Bridge** | “Cool—if **staleness** is OK on browse, I can lean on **cache** and **precompute** more; I still keep **in-zone / not closed** tight because that’s **trust**.” |
+| **Core split (once)** | Same as [Key insight (say early)](#key-insight-say-early)—who’s **allowed** vs **order** under latency. |
+| **Checkout tie-in (one line)** | “Anything that implies **you can place this order** might need a **stricter** read at menu or checkout—we can align.” |
 
 ---
 
 ## 2. Estimate scale
 
 Order-of-magnitude talk track (tune with interviewer):
+
+<a id="say-voice-2"></a>
+#### Human interaction (estimate scale)
+
+**Habit:** *“I’ll throw round numbers—correct me if your mental model’s different; I only need the **shape**.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Read-heavy** | “Homepage is **read-heavy**—think **tens of thousands to ~100k** reads/sec per big **region** at peak, vs **orders** which are much rarer—so I care about **partition**, **cache**, and **bounding work** per request.” |
+| **Candidates** | “Before ranking, I’m assuming **hundreds to a few thousand** restaurant ids **max** per request—otherwise **p99** ranking doesn’t stay in the **~100–300ms** ballpark.” |
+| **Payload** | “JSON is **kilobytes to tens of KB** per response plus **images on CDN**—so pagination and not over-fetching matter.” |
+| **Invite correction** | “If your peak is an **order of magnitude** off, I’d shift how much we **precompute**—the **architecture shape** stays the same.” |
 
 | Dimension | Illustrative assumption | Implication |
 |-----------|-------------------------|-------------|
@@ -447,6 +176,18 @@ Order-of-magnitude talk track (tune with interviewer):
 ---
 
 ## 3. APIs and data model
+
+<a id="say-voice-3"></a>
+#### Human interaction (APIs & data model)
+
+**Habit:** *“Thin API contract, honest data ownership.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **APIs** | “Surface stays **small**—`GET /home`, nearby, hand off **search** and **detail/menu**; headers for **auth**, **trace**, maybe **experiment** cohort.” |
+| **Storage split** | “**Orders** live in **relational** OLTP where invariants matter; **menus** are messy—I’m fine with **documents** or fat JSON for reads; **search** is its **own index**, not `LIKE` at scale.” |
+| **Entities** | “I keep **User, Address, Restaurant, Menu/Dish, Order, lines, promos, impressions** straight—who **owns** writes vs who serves reads.” |
+| **Metrics** | “Anything like **most ordered** is defined from **order facts** in the **warehouse**—Redis can **mirror** for speed, not **define** truth.” |
 
 ### 3.1 Public APIs (sketch)
 
@@ -488,6 +229,17 @@ Order-of-magnitude talk track (tune with interviewer):
 ---
 
 ## 4. High-level architecture
+
+<a id="say-voice-4"></a>
+#### Human interaction (high-level architecture / HLD)
+
+**Habit:** *“I’ll walk the diagram like a pipeline, not a slide title.”*
+
+| Moment | Say it like this in the room |
+|--------|------------------------------|
+| **Zoom out** | “Client hits **CDN** for images, **gateway** for policy, then a **home service** that’s basically **locate → geo candidates → filter → rank → assemble**.” |
+| **Data row** | “Behind that: **spatial index**, **catalog**, **features**, hot stuff in **Redis**, **orders** feeding **Kafka → OLAP** for aggregates—not on the critical read path.” |
+| **Checkpoint** | “Before I sequence **`GET /home`**, does this **split** match how you think about **team ownership**?” |
 
 ```mermaid
 flowchart LR
@@ -531,6 +283,21 @@ flowchart LR
 ---
 
 ## 5. Deep dive: critical flow
+
+<a id="say-voice-5"></a>
+#### Human interaction (deep dive — critical flow)
+
+**Habit:** *“I’ll trace **one** `GET /home` like a debugger—same order as the sequence diagram.”*
+
+| Step | Say it like this in the room |
+|------|-------------------------------|
+| **Auth & location** | “**Auth** at the edge; resolve **location** and log **GPS vs saved vs fallback**—half the weird tickets are location quality.” |
+| **Geo** | “**Spatial** lookup: **cell + neighbors** so we don’t miss boundary users; **cap** ids in dense areas.” |
+| **Eligibility & hydrate** | “**Hard filter** what’s actually allowed; **batch** catalog reads so we don’t **N+1**.” |
+| **Rank** | “**Two-stage** score: cheap wide retrieve, heavier re-rank on a **short list**; **deadline**—if we miss it, **fallback** ordering but **eligibility** still holds.” |
+| **Assemble & respond** | “**Mixer** for promos/experiments; **ETag** / CDN for repeat visits.” |
+| **Cache policy** | “**Trending** can be stale; **open/closed** shorter **TTL** + **version**; cache is never **source of truth** for business metrics—same as the **§5.4** table above.” |
+| **Anchor** | “The main bottleneck I see here is **\_\_\_**—**hot cell**, **rank tail**, or **stampede**—that’s what I’d instrument first.” |
 
 This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
 
@@ -598,6 +365,18 @@ sequenceDiagram
 ---
 
 ## 6. Scaling and bottlenecks
+<a id="say-voice-6"></a>
+#### Human interaction (scaling & bottlenecks)
+
+**Habit:** *“Name what breaks first—then the fix sounds obvious.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **10× traffic** | “Shape stays the same—I get more **aggressive** on **caps**, **cache**, and **rank deadlines**; **eligibility** rules don’t change, we just apply them **cheaper**.” |
+| **Hot geocell** | “Dense cell → **shard** it, **replica** reads, **strict cap** on candidates.” |
+| **Rank tail** | “Ranker blows **p99** → **time-box**, **breaker**, **fallback** ordering.” |
+| **Stampede** | “Cache expiry nukes DB → **single-flight**, **TTL jitter**, **warm** keys on deploy.” |
+
 
 ### 6.1 Geo indexing and optimizations
 
@@ -619,6 +398,19 @@ sequenceDiagram
 ---
 
 ## 7. Reliability and failure handling
+
+<a id="say-voice-7"></a>
+#### Human interaction (reliability & failure handling)
+
+**Habit:** *“Degrade the fancy stuff before you degrade truth.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Timeouts** | “Every dependency gets a **timeout**; ranker slow → **fallback** order, not fantasy scores.” |
+| **Eligibility** | “I don’t relax **in-zone / closed** because ranking is sick—unless product explicitly says so.” |
+| **Partial success** | “Personalization dies → **partial homepage** beats a **500**; I shed **promos** before **near you**.” |
+| **Retries** | “Retry only **idempotent** reads, **backoff + cap**—no **retry storms**.” |
+| **Interrupted** | “If you cut in—same design, just more ruthless on **caps** and **deadlines**.” |
 
 ### 7.1 Dependency behavior
 
@@ -645,6 +437,17 @@ sequenceDiagram
 
 ## 8. Tradeoffs and alternatives
 
+<a id="say-voice-8"></a>
+#### Human interaction (tradeoffs & alternatives)
+
+**Habit:** *“I’ll name the trade, pick a side, and say what would change my mind.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Freshness vs latency** | “I’m OK if **browse** is a little **stale** if **p99** stays happy; I’m not OK being **wrong** about serviceability.” |
+| **Online rank vs precompute** | “More **online** rank → fresher but **tail risk**; more **precompute** → stable latency but **pipeline** work.” |
+| **Store / service forks** | “PostGIS vs Redis GEO vs search geo; BFF **monolith** vs split services—I’d pick based on **ops maturity**, **team boundaries**, and **who can own** incidents.” |
+
 ### 8.1 Product / system tradeoffs
 
 | Decision | Upside | Downside |
@@ -667,6 +470,20 @@ sequenceDiagram
 ---
 
 ## 9. Monitoring, observability, and security
+
+<a id="say-voice-9"></a>
+#### Human interaction (monitoring, observability & security)
+
+**Habit:** *“Observability is how I prove the story I just drew.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Tracing** | “One **trace** per `GET /home` with spans matching the pipeline—when **p99** moves, I know **which hop**.” |
+| **Dashboards** | “I watch **fallback rate**, **empty geo**, **rank timeouts**, **location source** mix.” |
+| **Metrics truth** | “Business metrics = **§3.5 / §9.2**—**warehouse** defines them; Redis is a **mirror** with known lag.” |
+| **Security** | “Still **auth** personalized routes, **rate limits**, lean logs, **signed** media URLs.” |
+| **Compliance** | “If you care: **residency**, separate merchant/consumer in logs, **no secrets** in query strings.” |
+
 
 ### 9.1 Monitoring and SLIs / SLOs
 
@@ -758,74 +575,50 @@ Uber **HLD** rewards **distributed-systems** thinking; classic **GoF** still app
 | **Fat BFF** | Velocity | **Blast radius**—split when team scales |
 | **Strong cache** on eligibility | Speed | Risk if invalidation wrong—keep **short TTL** |
 
+<a id="say-voice-10"></a>
+#### Human interaction (design patterns, data structures & best practices)
+
+**Habit:** *“Pattern names are shorthand for behavior—**one** name per beat, tied to **where** on the board.”*
+
+| You mean… | Say it like this in the room |
+|-----------|-------------------------------|
+| **Distributed patterns** | “**Gateway** = policy surface; **BFF** = shape payload; **breaker/bulkhead** = ranker sick doesn’t take down the world; **cache-aside** + **CQRS-lite** = reads vs writes; **Kafka** = metrics off the hot path.” |
+| **Classic / service OO** | “**Chain** = middleware pipeline; **Observer** = impressions async; **State** = open/paused rules—only if they push LLD.” |
+| **Data structures** | “**Cell → ids** spatially; **bounded list / heap** before expensive rank; **inverted index** for search; **OLAP** for metric scans.” |
+| **Trade** | “More **sync** rank → fresher, worse **tail**; more **precompute** → calmer latency, heavier **pipelines**.” |
+
+---
+
+## Closing notes (where wrap-up human interaction lives)
+
+Endgame is **short**, **confident**, and **conversational**: use the **`#### Human interaction`** blocks under [Bar-raiser](#bar-raiser-follow-ups), [Communication](#communication-do-vs-avoid), and [60-second close](#60-second-close)—not a second full design pass.
+
 ---
 
 ## Bar-raiser follow-ups
 
-**Q: “How do you know ranking is not biased against new restaurants?”**  
-A: “**Exploration** slots + **cold-start** features; monitor **share of impressions** by tenure; separate **business** constraints from model.”
+<a id="say-voice-bar"></a>
+#### Human interaction (bar-raiser)
 
-**Q: “Multi-region?”**  
-A: “**Regional** datasets for catalog + spatial; **async** replication for analytics; user reads **local**; accept **eventual** for global aggregates unless specified.”
+**Habit:** two–four sentences, then **stop**—let them steer.
 
-**Q: “Search same index as nearby?”**  
-A: “Often **separate** inverted index with geo filter; same **restaurant id** space; **join** in application layer.”
-
----
-
-## Strong Hire room checklist
-
-Use this in the last two minutes of practice—or mentally in the room.
-
-- [ ] **Structured flow ([spine](#interview-spine-nine-steps)):** 1 clarify → 2 scale → 3 APIs/model → 4 architecture → 5 **critical path** → 6 bottlenecks → 7 reliability → 8 tradeoffs → 9 monitoring/security  
-- [ ] **Key insight stated early:** eligibility vs ranking split  
-- [ ] **Deep dive**, not only boxes: walk **one** request end-to-end with **timeouts** and **fallback**  
-- [ ] **Bottlenecks named** with mitigations: hot geocell, ranker tail, stampede  
-- [ ] **Tradeoffs explicit:** freshness vs latency; online rank vs precompute  
-- [ ] **Metrics** grounded in **order facts** + **Kafka → OLAP**, not “whatever Redis says”  
-- [ ] **Language of ownership:** “critical path,” “latency budget,” “bottleneck,” “fallback,” “SLO”
-
----
-
-## Communication: DO vs AVOID
-
-**Do**
-
-- Speak in **short blocks**; pause for alignment.  
-- Every cache or Redis mention tied to **access pattern** and **staleness**.  
-- End sections with **“So the main bottleneck here is …”** when true.
-
-**Avoid**
-
-- Jumping randomly between topics without a **plan**.  
-- Listing technologies without **why this workload**.  
-- Saying “we’ll use Redis” with no **key design**, **TTL**, or **invalidation** story.
-
-**Mindset:** you do not need a **perfect** design—you need **clear thinking**, **explicit tradeoffs**, and **calm** adaptation when the interviewer adds constraints.
-
-For **layering** (geo, then ranking, then cache—not all at once), see [How to drive the round](#how-to-drive-the-round-natural-conversation).
+| They ask | Say it like this |
+|----------|------------------|
+| **Bias / new restaurants** | “**Exploration** slots and **cold-start** features; watch **impression share** by tenure; keep **business** rules separate from the raw model.” |
+| **Multi-region** | “**Regional** catalog and spatial; user reads **local**; analytics **async**; I’m fine with **eventual** global rollups unless you need stronger.” |
+| **Search vs nearby index** | “Usually **different** inverted index with geo filter; same **restaurant id**; **join** in the app layer.” |
 
 ---
 
 ## 60-second close
 
-**Short (use if clock is tight):**
+<a id="say-voice-close"></a>
+#### Human interaction (60-second close)
 
-“Homepage is a **read funnel**: **geo** produces a **capped** candidate set with **neighbor cells**; **ranking** is **time-boxed** with **fallback**; **catalog** hydrates in **batch**. **Orders** stay **ACID** in SQL; **metrics** come from **facts** streamed to **OLAP**; **Redis** is an accelerator with explicit **staleness** rules.”
+**Habit:** one **net-net** pass—stretch or compress to the clock.
 
-**Longer variant:** use the **Wrap-up — conversational** block in [How to drive the round](#how-to-drive-the-round-natural-conversation) when you have extra time at the end.
+| Beat | Say it like this in the room |
+|------|-------------------------------|
+| **Recap** | “**Read funnel**: **geo** → **capped** ids with **neighbors**; **batch** hydrate; **rank** under a **deadline** with **fallback**; **cache** where staleness is OK; **orders** **ACID** in SQL; **metrics** from **warehouse / OLAP**; **eligibility** correct even if ranking **degrades**.” |
 
 ---
-
-## Honest rating: can you drive from this doc?
-
-**Short answer:** yes. This file is **Strong Hire–shaped** if you **sound like yourself**—not like you are reading a press release.
-
-| Dimension | Note |
-|-----------|------|
-| **Structure** | Matches a clean **nine-step** spine: clarify → scale → APIs/model → architecture → **critical path** → scaling → reliability → tradeoffs → monitoring/security. |
-| **Depth** | Geo boundary + cap, rank timeout + fallback, metrics from **facts**, stampede mitigations—these are **senior** signals, not textbook filler. |
-| **Risk** | **Memorization.** If you recite blocks word-for-word, you slide toward “prepared” instead of “owns the room.” **Paraphrase**; use [natural conversation](#how-to-drive-the-round-natural-conversation). |
-| **Drive** | You can **lead** with the opening + checkpoints; the doc is the **rail**, your mouth is the **train**. |
-
-**Interviewer-level take:** roughly **9/10** material **if delivered** with pauses, adaptation, and plain-English first. The gap to 10/10 is usually **live follow-ups** (weird edge cases, org-specific constraints)—you earn those in the room, not on paper.
