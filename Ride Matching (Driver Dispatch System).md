@@ -1,4 +1,4 @@
-# HLD — Ride Matching (Driver Dispatch System)
+# HLD — Ride Matching / Driver Dispatch System
 
 <a id="interview-spine-nine-steps"></a>
 
@@ -8,11 +8,13 @@
 
 <a id="live-flow-open"></a>
 
-**Opening (~once):** *“I’ll align on **batching vs greedy**, **ETA vs earnings** objective, **surge** input, and **fairness**; then **scale**, **data structures for geo**, **architecture**, and **one match cycle**. **Pause after the diagram**—**scoring**, **rebalance**, or **load**?”*
+**Opening (~once):** *“I’ll align **objective** (**ETA vs earnings**), **surge** as input, **fairness**, and **latency SLO**; I’ll **default** to **streaming greedy** matching and only add **batch** reassignment if **throughput/optimality** goals force it. Then **scale**, **geo structures**, **architecture**, **one match cycle**. **Pause after the diagram**—**scoring**, **rebalance**, or **load**?”*
 
 **Thinking transitions:** *“This is an **online optimization** problem under **latency SLO**—I’ll **cap candidates** before scoring.”*
 
 **Live rule:** Paraphrase tables; deep on **geo + scoring** only if steered.
+
+**User journey (once):** say [👤 User journey](#user-journey-framing) **before** the architecture diagram so the room hears **product** before boxes.
 
 <a id="say-1-questions-human"></a>
 ### 1.1 Clarify
@@ -20,7 +22,7 @@
 | Topic | Say it like this in the room |
 |--------------------------|-------------------------------|
 | **Objective** | “Minimize **ETA**, maximize **throughput**, or **blend**—what’s the **default**?” |
-| **Batching** | “Do we **re-match** every **Δt**, or **commit** on first acceptable driver?” |
+| **Batching** | “I’d **default streaming greedy** for **p99**—do you need **periodic batch** reassignment for **global** optimality, or is **continuous** re-offer enough?” |
 | **Surge** | “Is **surge** an **input feature** only, or does it change **search radius**?” |
 | **Pool** | “**Shared rides** change matching—**in scope**?” |
 | **Fairness** | “**Driver starvation**—do we need **rotation** or **throttle** repeat declines?” |
@@ -40,7 +42,7 @@
 **Core**
 
 - Index **available drivers** by location + product capability.  
-- For each **trip request** (or batch window), select **K candidates**, **score**, emit **offer(s)** with **TTL**.  
+- For each **trip request** (**streaming** path by default), select **K candidates**, **score**, emit **offer(s)** with **TTL**; optional **batch** reassignment windows only if product/ops want **pooled** optimization.  
 - Handle **driver going offline**, **timeout**, **rider cancel**.
 
 ### 1.3 Non-functional requirements (NFR)
@@ -67,12 +69,12 @@
 <a id="key-insight-say-early"></a>
 ### Key insight (say early)
 
-**Cap candidates before expensive scoring**; treat matching as **continuous online reassignment** with **clear commit boundaries** back to **Trip service**.
+**Cap candidates before expensive scoring**; treat matching as **continuous online** (**default: streaming greedy**) reassignment with a **hard commit boundary**: **matcher proposes → Trip commits** (see [🔒 Commit Boundary](#commit-boundary-anchor)).
 
 #### Key anchors
 
 1. “**Geohash / S2 / H3** cells + **neighbor** lookup.”  
-2. “**Batch** windows vs **streaming**—state default + caveat.”  
+2. “I’d **default streaming greedy** for **latency**; add **batching** only when **optimization** goals (throughput, pooled reassignment) **clearly** justify the **wait** and **complexity**.”  
 3. “**TTL offers** + **idempotent** reserve RPC to Trip.”
 
 ---
@@ -101,7 +103,7 @@
 |-----|---------|
 | `POST /v1/match/jobs` | Trip service enqueues new/updated trip |
 | `POST /v1/drivers/{id}/heartbeat` | Location + availability |
-| `POST /v1/match/{trip_id}/commit` | Trip service confirms assignment (callback) |
+| Matcher → Trip RPC (sketch) | **`ProposeDriver` / `ReserveDriver`**—**conditional** placement; **only Trip** performs **final commit** on rider accept ([🔒 Commit Boundary](#commit-boundary-anchor)) |
 
 ### 3.2 Data structures
 
@@ -111,9 +113,78 @@
 
 ---
 
+## 👤 User Journey (say once early)
+
+<a id="user-journey-framing"></a>
+
+**Say it once early** (before or right after the [architecture diagram](#4-high-level-architecture)):
+
+*“From the **user** side:
+
+**User requests a ride** → the **trip** enters **matching** → the system **finds nearby drivers** → a **driver receives an offer** → **accepts** → the **Trip service commits** the assignment and the ride moves forward.
+
+So in one line:
+- **Matcher** = **search** + **score** + **propose** (offers, TTL)
+- **Trip service** = **commit** + **correctness** (no double-book, durable state)”*
+
+👉 **Product-aligned** before you draw **Matcher** vs **Trip**.
+
+---
+
+## 🔒 Commit Boundary (anchor)
+
+<a id="commit-boundary-anchor"></a>
+
+**Say this strongly once:**
+
+**Matcher proposes; Trip service commits.**
+
+That is what keeps:
+
+- **No double assignment** of the same driver (and **one** committed trip per driver per policy)  
+- **Consistency** across the system—matching can be **wrong or stale** sometimes; **commit** is the **hard gate**
+
+**In the room:** *“I treat **`ProposeDriver`** / **`ReserveDriver`** as **conditional**; **`accept`** on the rider side and the **transactional commit** in **Trip** are the **only** place the marketplace **becomes true**.”*
+
+---
+
+## 🚗 Driver State Consistency
+
+<a id="driver-state-consistency"></a>
+
+**Bar Raiser probe:** *“What if **driver state** is **stale**?”*
+
+**Driver availability is eventually consistent** (heartbeats, GPS, online bit):
+
+- **TTL** on index entries—**expire** drivers who stop heartbeating.  
+- **Re-validate** at **commit** time: Trip / Matcher **reserve** RPC checks **fresh** snapshot or **fails** → **re-offer**.  
+- **Final correctness** lives in **Trip service** on commit—see [🔒 Commit Boundary](#commit-boundary-anchor).
+
+**Say aloud:** *“Stale index is **ok for search**; **stale commit** is **not**—so we **expire** and **re-check**.”*
+
+---
+
+## 👤 UX Awareness
+
+<a id="ux-awareness"></a>
+
+**Tie matching behavior to the rider screen:**
+
+- If **no driver** is found quickly, the user should see **“Searching for drivers…”** with **expanding radius** (or equivalent product behavior)—**not** an immediate **hard failure** unless policy truly requires it.  
+- **Degrade** with **transparency** (still **honest** ETA bands when we widen search).
+
+---
+
 ## 4. High-level architecture
 
 <a id="say-voice-4"></a>
+#### Human interaction (high-level architecture)
+
+| Moment | Say it like this in the room |
+|--------|------------------------------|
+| **User journey** | “Same beat as [👤 User journey](#user-journey-framing): **request → match → offer → driver accept → Trip commits**.” |
+| **Commit** | “[🔒 Matcher proposes, Trip commits](#commit-boundary-anchor)—I never ‘finish’ a trip inside the matcher alone.” |
+| **Stale drivers** | “[🚗 Heartbeat TTL + re-check at reserve](#driver-state-consistency)—index can lag; **commit** can’t lie.” |
 
 ```mermaid
 flowchart LR
@@ -133,8 +204,8 @@ flowchart LR
 
 | Phase | Ship |
 |-------|------|
-| **1** | Greedy nearest with ETA call |
-| **2** | Batched reassignment, feature-based score |
+| **1** | **Streaming greedy** nearest + capped ETA calls (**default**) |
+| **2** | Richer **online** score + optional **batch** reassignment only if **SLO + product** demand it |
 | **3** | Regional **shards**, **simulation** shadow traffic |
 
 ---
@@ -142,6 +213,11 @@ flowchart LR
 ## 5. Deep dive: one match cycle
 
 <a id="say-voice-5"></a>
+#### Human interaction (deep dive)
+
+**Habit:** *“**One cycle** on the board—then anchor [🔒 commit](#commit-boundary-anchor).”*
+
+If they challenge **batch vs streaming**, default: **streaming greedy** for **p99**; **batch** only for **documented** optimality wins—see [Key insight](#key-insight-say-early).
 
 <a id="bottleneck-anchor-once"></a>
 ### 🎯 Bottleneck Anchor
@@ -161,7 +237,7 @@ sequenceDiagram
   M->>Trip: ProposeDriver(driver_id, TTL)
 ```
 
-**Taking a stance:** *“**Batch ETA** where the **routing** API allows; else **two-phase**: cheap distance prefilter → **few** precise ETAs.”*
+**Taking a stance:** *“**Streaming** cycle: **Batch ETA** *requests* to routing where the API allows (parallel **capped**), but **don’t wait** on a **global batch** of *trips* unless we’ve agreed that **product tradeoff**—**default greedy per trip** for **latency**.”*
 
 ### 5.1 Re-match / rebalance
 
@@ -189,8 +265,9 @@ sequenceDiagram
 ## 7. Reliability and failure handling
 
 - **Matcher crash:** job **requeued**; **idempotent** propose.  
-- **Stale driver list:** **heartbeat TTL** evicts drivers.  
-- **Trip already filled:** **Trip service** rejects reserve—matcher **acks** and stops.
+- **Stale driver list:** **heartbeat TTL** evicts drivers; **re-validate** on **reserve**—full story in [🚗 Driver State Consistency](#driver-state-consistency).  
+- **Trip already filled:** **Trip service** rejects reserve—matcher **acks** and stops.  
+- **No driver found:** align with [👤 UX Awareness](#ux-awareness)—**searching** + **expand**, not silent fail.
 
 ---
 
@@ -198,8 +275,8 @@ sequenceDiagram
 
 | Choice | Trade |
 |--------|--------|
-| **Greedy online** | Low latency vs global optimum |
-| **Batch assignment** | Better objective vs **wait** to batch |
+| **Streaming greedy (default)** | Best **p99** / responsive UX vs **global** optimum |
+| **Batch assignment (add later)** | Better pooled objective vs **wait** to batch + **complexity** |
 | **Pull vs push offers** | Driver UX vs control |
 
 ---
@@ -217,7 +294,7 @@ sequenceDiagram
 |---------|-----|
 | **Spatial index** | H3/S2/Geohash |
 | **Priority queue** | Trip urgency |
-| **Strangler** | Replace greedy with batch gradually |
+| **Strangler** | Add **batch** reassignment behind flag without breaking **default** streaming path |
 
 <a id="say-voice-10"></a>
 **Live:** at most **four** patterns tied to boxes.
@@ -232,6 +309,8 @@ sequenceDiagram
 |----|--------|
 | **Cap K** | O(all drivers) scan |
 | **Separate Trip commit** | Matcher mutates trip without txn |
+| **[🔒 Commit boundary](#commit-boundary-anchor)** | “Matcher figured it out” with no Trip gate |
+| **User journey before boxes** | System-only walkthrough |
 
 ---
 
@@ -241,6 +320,8 @@ sequenceDiagram
 |----------|------------------|
 | **Bipartite matching** | “**Min-cost flow** offline great; online needs **approximation** under **latency**.” |
 | **Multi-leg** | “**OR-Tools** / heuristics for **sequenced** pickups—separate **batch** service.” |
+| **Stale driver / split brain** | “**TTL** + **re-check at reserve**; **Trip commit** is **truth**—[🚗 Driver State](#driver-state-consistency).” |
+| **“Who commits?”** | “**[Matcher proposes, Trip commits](#commit-boundary-anchor)**—always.” |
 
 ---
 
@@ -248,6 +329,6 @@ sequenceDiagram
 
 | Beat | Say it like this |
 |------|------------------|
-| **Recap** | “**Spatial index** + **capped** candidates + **scoring** + **TTL offers**; **Trip** owns **commit**; bottlenecks **ETA RPC** and **hot cells**; **metrics** on **offer latency**.” |
+| **Recap** | “**User journey**: **request → match → offer → accept → Trip commits**. **Matcher** = search + score + propose; **Trip** = **commit** + correctness. **Default streaming greedy**; **batch** only if optimization demands. **Stale drivers**: **TTL** + **re-validate at reserve**. **UX**: **searching** + **expand radius**, not instant fail. **Tech**: **spatial index**, **cap K**, **TTL offers**; watch **ETA RPC** + **hot cells**.” |
 
 ---
