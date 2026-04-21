@@ -4,6 +4,16 @@
 
 ## 1. Clarify requirements
 
+### 1.0 Live flow (how to open and steer)
+
+<a id="live-flow-open"></a>
+
+**Opening (~once):** *“I’ll align on **E2E vs server-visible**, **1:1 vs groups**, **retention**; then **scale**, **APIs + storage**, **architecture**, and **send message** end-to-end. I’ll **pause after the diagram**—depth on **ordering**, **fan-out**, or **WS reliability**?”*
+
+**Thinking transitions:** *“Let me think through …”* · *“The ordering contract is …”* · *“If durability is non-negotiable I’d …”* · *“Let me sanity-check …”* · *“Hot chat means …”*
+
+**Live rule:** **Paraphrase** §1–2 tables; don’t read every row. Go deep **only if they probe**.
+
 <a id="say-1-questions-human"></a>
 ### 1.1 Clarify 
 
@@ -24,6 +34,8 @@
 #### Human interaction (FR — how to explain after alignment)
 
 **Habit:** *“**Send**, **order**, **sync**—three beats.”*
+
+**Live:** one **spoken** FR pass (~60–90 s); use [§1.0](#live-flow-open) when you move **FR → NFR**.
 
 | FR area | Say it like this in the room |
 |---------|-------------------------------|
@@ -66,6 +78,12 @@
 | **Availability** | “**Typing** can drop before **messages** under pressure.” |
 | **Security** | “**AuthZ** per chat; **rate limits** on send.” |
 
+#### UX on the wire (say with NFR)
+
+- **Slow send:** show **pending** state; **retry** with same **`client_msg_id`**—never two bubbles for one intent.  
+- **Reconnect:** **resume** from last **ACK’d seq**—user sees **gap-free** merge, not dupes.  
+- **Typing / presence sick:** **drop** ephemeral signals before **message** delivery degrades.
+
 **Latency**
 
 - Low latency for **online** delivery; typing can be **best-effort**.
@@ -90,9 +108,18 @@
 
 - **AuthN** on WS; **authZ** per chat membership; **rate limits**; abuse controls.
 
+<a id="key-insight-say-early"></a>
 ### 1.4 Invariants (one sentence you repeat under pressure)
 
 **Invariant:** “For a given chat, **server-assigned order** is the **canonical** order for delivery; clients **dedupe** using **`client_msg_id`** (or equivalent).”
+
+#### Key anchors (say these confidently—any order)
+
+1. “**Durability before ACK** (or explicit WAL tradeoff you name).”  
+2. “**Total order per `chat_id`**—not global order across chats.”  
+3. “**At-least-once** fan-out + **idempotent** server + **client dedupe**.”  
+4. “**Shard by `chat_id`**; **hot chat** = rate limit / sub-queue / materialized fan-out.”  
+5. “**Catch-up** via **`after_seq`**—all devices **converge**.”
 
 <a id="say-voice-1"></a>
 
@@ -111,6 +138,8 @@
 #### Human interaction (estimate scale)
 
 **Habit:** *“**Billions/day** is the mental default—tune down if they want.”*
+
+**Live:** *“Let me sanity-check scale…”* then **msgs/day**, **shard key**, **hot chat**—**invite correction** before the dimension table.
 
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
@@ -140,6 +169,7 @@
 |-------|-------------------------------|
 | **APIs** | “**Connect** over WS; **SendMessage** with **`client_msg_id`**; **GET** messages with **`after_seq`**.” |
 | **Model** | “Message row is **`chat_id` + `server_seq`**; device tracks **last ack’d seq**.” |
+| **Core split (once)** | Same as [Key insight / invariant](#key-insight-say-early)—**canonical server order** + **client dedupe**. |
 
 ### 3.1 APIs (sketch)
 
@@ -172,6 +202,7 @@
 | **Path** | “Client → **LB** → **WS gateway** → **chat service** → **DB** by **`chat_id`**.” |
 | **Fan-out** | “After commit, enqueue **deliver_to_recipients**; queue pushes back to **gateways**.” |
 | **Registry** | “**Redis** maps user → gateway for the right **push** box.” |
+| **Steer** | “**Deeper** on **persist/ACK**, **fan-out queue**, or **reconnect + replay** next?” |
 
 ```mermaid
 flowchart TB
@@ -194,6 +225,16 @@ flowchart TB
 
 **Media:** pre-signed **object storage**; message stores **pointer** only.
 
+### 4.1 How we’d evolve this (if they ask “phases / MVP”)
+
+| Phase | Ship | Why |
+|-------|------|-----|
+| **1 — MVP** | **Single-region**, **WS + REST catch-up**, **idempotent** send, **simple** fan-out queue | Prove ordering + dedupe story |
+| **2 — Growth** | **Registry**, **hot-chat** limits, **media** pre-signed path, **DLQ** hygiene | Reliability at scale |
+| **3 — Scale** | **Partitioned** fan-out, optional **materialized inbox**, **multi-region** **leader per chat** | Tail + DR |
+
+**Taking a stance:** *“I’d default **commit-then-ACK** with **at-least-once** delivery and **explicit** client dedupe—**exactly-once** is a **product illusion**, not a wire guarantee.”*
+
 ---
 
 ## 5. Deep dive: critical flow
@@ -209,8 +250,11 @@ flowchart TB
 | **ACK** | “Return **ACK** only after **durable** commit (or say WAL explicitly).” |
 | **Deliver** | “Enqueue fan-out; **at-least-once** to gateways—clients **dedupe**.” |
 | **Anchor** | “First metrics: **send p99**, queue **depth**, **duplicate** rate.” |
+| **Production voice** | “**GW crash** mid-send—client **retries** same **`client_msg_id`**; **queue backlog**—**shed typing**; **split brain** writer—**fencing** token if they push multi-region.” |
 
 This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
+
+**Taking a stance:** *“I’d **shard by `chat_id`**, **sticky** routing to a pool of gateways, and **internal queue** for fan-out—**materialized per-user inbox** only if **hot chat** or **fan-out cost** forces it.”*
 
 ### 5.1 Send message (sequence)
 
@@ -283,6 +327,9 @@ sequenceDiagram
 | **GW crash** | “Client **reconnects**, **replays** from last **ACK’d seq**.” |
 | **Dupes** | “Server **idempotent** insert; client **dedupe** on `server_seq`.” |
 | **Multi-region** | “**Leader per chat** or eat latency; **fencing** if failover writers.” |
+| **Incident tone** | “**Duplicate bubbles** after reconnect—**idempotent** insert saves you; **one hot partition**—**rate limit** + **sub-queue**; **provider** push outage—**queue depth** + **DLQ**.” |
+
+**UX tie-in (say aloud):** *“**Pending** → **sent** states; **ordering** matches server seq; **typing** drops before **messages** under load.”*
 
 - **Gateway crash:** client **reconnect**, **replay** from last **ACK’d seq**.  
 - **Duplicate delivery:** idempotent UI + server dedupe on `client_msg_id`.  
@@ -302,6 +349,8 @@ sequenceDiagram
 |-------|-------------------------------|
 | **Ordering** | “Strong per-chat order is simple; cost is **hot shard**.” |
 | **Inbox** | “Materialize per-user inbox—**fast read home**, **write amplification**.” |
+| **My default (ordering)** | “**Server seq per chat** + **client_msg_id** dedupe—simple story under pressure.” |
+| **My default (fan-out)** | “**Queue push** to online gateways first; **inbox materialization** if **hot chat** breaks the model.” |
 
 | Choice | Upside | Downside |
 |--------|--------|----------|
@@ -385,6 +434,8 @@ Say **where** each pattern lives—registry, outbox, idempotent consumer—not a
 
 **Habit:** *“**Registry**, **outbox/WAL**, **idempotent consumer**, **circuit breaker**—one line each.”*
 
+**Live:** **at most four** patterns tied to boxes; then stop.
+
 | You mean… | Say it like this in the room |
 |-----------|-------------------------------|
 | **Patterns** | “**Connection registry** routes push; **outbox** after commit; **breaker** on flaky deps; **bulkhead** typing vs send.” |
@@ -394,7 +445,20 @@ Say **where** each pattern lives—registry, outbox, idempotent consumer—not a
 
 ## Closing notes (where wrap-up human interaction lives)
 
-Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups) and [60-second close](#60-second-close).
+Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Communication (do vs avoid)](#communication-do-vs-avoid), and [60-second close](#60-second-close).
+
+<a id="communication-do-vs-avoid"></a>
+### Communication (do vs avoid)
+
+| Do (sounds senior) | Avoid (sounds rehearsed) |
+|--------------------|---------------------------|
+| **Name ACK semantics** clearly | “We’re durable” with no commit point |
+| **Checkpoint** after diagram | One monologue through WS details |
+| **Default + caveat** on inbox vs queue | Listing every transport |
+| **Invite** hot-chat depth | Assuming groups are always small |
+| **Time-box** | Reading the whole doc aloud |
+
+**60-minute sketch (flex):** clarify+FR+NFR ~8–12 · scale+APIs ~8–12 · architecture ~8–12 · **deep dive ~15–22** · scale→monitoring ~10–15 · patterns+close ~5–8.
 
 ---
 
