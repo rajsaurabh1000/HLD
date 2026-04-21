@@ -10,9 +10,11 @@
 
 **Opening (~once):** *“I’ll align on **edge vs level** alerts, **channels + cost**, **quiet hours**, **tick→notify SLO**; then **scale**, **APIs + state**, **architecture**, and **one tick** through **match → dedupe → outbox**. I’ll **pause after the diagram**—depth on **hot symbols**, **dedupe**, or **provider failure**?”*
 
-**Thinking transitions:** *“The dedupe key is …”* · *“If SMS is money I’d …”* · *“Let me sanity-check …”* · *“One tradeoff: coalesce vs precision …”*
+**Thinking transitions:** *“The dedupe key is …”* · *“If SMS is money I’d …”* · *“Let me sanity-check …”* · *“Coalesce only if product **explicitly** trades precision for CPU …”*
 
 **Live rule:** **Paraphrase** §1–2 tables; don’t read every row. Go deep **only if they probe**.
+
+**User journey (once):** say the [👤 User journey](#user-journey-framing) line **before** the architecture diagram so the room has a **product** entry point.
 
 <a id="say-1-questions-human"></a>
 ### 1.1 Clarify 
@@ -115,7 +117,8 @@
 2. “**Dedupe** on **crossing**, not every raw tick.”  
 3. “**Outbox** before **SMS**—**breaker** + **retry** on providers.”  
 4. “**Rule version** or snapshot—no silent **mid-flight** behavior changes.”  
-5. “**At-least-once** pipeline; **at-most-once per crossing** to the user.”
+5. “**At-least-once** pipeline; **at-most-once per crossing** to the user.”  
+6. “**User journey** (say once)—[rule → ticks → crossing → notify → cooldown](#user-journey-framing); **write** / **stream** / **delivery** paths.”
 
 <a id="say-voice-1"></a>
 
@@ -140,14 +143,14 @@
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
 | **Skew** | “Rules and ticks **clump** on liquid names—**partition by symbol**.” |
-| **CPU** | “Optional **coalesce** window (e.g. **100ms**) if product accepts less precision.” |
+| **CPU** | “**I’d only enable coalescing** if the **product explicitly** allows **lower precision** in exchange for **lower CPU**—never silently.” |
 
 | Dimension | Notes |
 |-----------|--------|
 | Symbols | Thousands liquid; **skewed** to mega caps |
 | Rules | Millions total; **concentrated** on AAPL-like names |
 | Ticks | High **QPS** per hot symbol—**partition** mandatory |
-| Coalesce window | Optional **100ms** batching to cut CPU |
+| Coalesce window | **Only** with explicit **product** trade: lower **precision** ↔ lower **CPU** |
 
 **Tie it in one line:** “**Horizontal matchers** + **symbol partitions** + **backpressure** before expensive channels.”
 
@@ -186,6 +189,23 @@
 
 ---
 
+## 👤 User journey (say once early)
+
+<a id="user-journey-framing"></a>
+
+**Say it once early** (before or right after the [architecture diagram](#4-high-level-architecture)):
+
+*“User **sets** an alert → **price ticks** come in → system **detects** a **crossing** → user **receives** a notification → system **enforces cooldown** so we don’t **spam**.
+
+So:
+- **write path** = **rule** creation / updates  
+- **stream path** = **tick** processing + match  
+- **delivery path** = notification **fan-out** (outbox → channels).”*
+
+👉 **Intuitive** mapping to **partition → match → dedupe → outbox** on the board.
+
+---
+
 ## 4. High-level architecture
 
 <a id="say-voice-4"></a>
@@ -196,6 +216,7 @@
 | Moment | Say it like this in the room |
 |--------|------------------------------|
 | **Log** | “Ticks land in **Kafka/Pulsar** keyed by **`symbol`**.” |
+| **User journey** | “Same story as [👤 User journey](#user-journey-framing): **rules** → **ticks** → **cross** → **notify** + **cooldown**.” |
 | **Match** | “Matchers pull **rules** for that symbol, run **edge FSM**, then **dedupe**.” |
 | **Send** | “**Outbox** per channel with **breakers** on Twilio/FCM/etc.” |
 | **Steer** | “**Deeper** on **hot symbol**, **dedupe keys**, or **DLQ / replay** next?” |
@@ -227,7 +248,7 @@ flowchart LR
 | Phase | Ship | Why |
 |-------|------|-----|
 | **1 — MVP** | **Single region**, **partitioned log**, **edge FSM**, **email/push** first, basic **dedupe** | Learn semantics + cost |
-| **2 — Growth** | **SMS** with **strict** rate limits + **quiet hours**, **hot-symbol** lanes, **coalesce** option | Cost + skew |
+| **2 — Growth** | **SMS** with **strict** rate limits + **quiet hours**, **hot-symbol** lanes; **coalesce** only if **product** explicitly trades precision for CPU | Cost + skew |
 | **3 — Scale** | **Dedicated** mega-cap partitions, **advanced** anti-flap, **multi-region** ingest | Tail + compliance |
 
 **Taking a stance:** *“I’d ship **email/push** before **SMS**; I’d treat **dedupe on crossing** as non-negotiable the day we pay per segment.”*
@@ -247,11 +268,25 @@ flowchart LR
 | **Match** | “Load rules; read **state**; **edge detect**; apply **cooldown**.” |
 | **Deliver** | “**Dedupe key** per crossing; enqueue **outbox**; channel worker **retries** with **breaker**.” |
 | **Production voice** | “**Market open** thundering herd—**stagger** matchers; **Twilio 5xx**—**DLQ** not duplicate SMS; **gap** in **seq**—**replay** vendor window.” |
-| **Anchor** | “Watch **tick→notify p99**, **matcher lag**, **SMS $/hour**, **dedupe hit rate**.” |
+| **Anchor** | “Say **once**—[🎯 Bottleneck Anchor](#bottleneck-anchor-once).” |
 
 This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
 
-**Taking a stance:** *“I’d default **Kafka keyed by symbol** + **stateful matcher** per partition + **outbox per channel**; I’d add **coalesce** only if the room trades precision for **CPU** explicitly.”*
+<a id="bottleneck-anchor-once"></a>
+### 🎯 Bottleneck Anchor
+
+**Say once in the deep dive:**
+
+The main bottleneck here is:
+
+- **hot symbols** causing **matcher overload**  
+- **or** **SMS provider** **rate limits**
+
+*That’s what I’d **monitor first**.*
+
+👉 Then **tick→notify p99**, **matcher lag**, **SMS $/hour**, **dedupe hit rate**.
+
+**Taking a stance:** *“I’d default **Kafka keyed by symbol** + **stateful matcher** per partition + **outbox per channel**; **I’d only enable coalescing** if the **product explicitly** allows **lower precision** in exchange for **lower CPU**.”*
 
 ```mermaid
 sequenceDiagram
@@ -296,7 +331,7 @@ sequenceDiagram
 | Risk | Mitigation |
 |------|------------|
 | **Hot symbol** | Dedicated partitions; **local** rule index per matcher shard |
-| **CPU** on matchers | **Coalesce** ticks; **short-circuit** empty rule sets |
+| **CPU** on matchers | **Coalesce** only with explicit **product** precision trade; else **short-circuit** empty rule sets |
 | **SMS provider** limits | Queue + **shaped** send; prioritize tiers |
 | **Thundering herd** on market open | Stagger + rate limit |
 
@@ -335,15 +370,16 @@ sequenceDiagram
 
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
-| **Coalesce** | “Batch ticks—cheaper, less **precise**.” |
+| **Coalesce** | “**I’d only enable it** if **product** explicitly accepts **lower precision** for **lower CPU**—otherwise **per-tick** matching.” |
 | **Pull rules** | “DB each tick—**fresh**; cache+TTL—**fast** but **staler**.” |
 | **My default (ticks)** | “**Append-only log** + **horizontal matchers**—never **lossy** silent drops.” |
 | **My default (notify)** | “**Outbox** + **channel breakers**; **SMS** last-class citizen behind **caps**.” |
+| **My default (coalesce)** | “**Off** unless **product** explicitly opts into **lower precision** for **lower CPU**.” |
 
 | Choice | Good | Bad |
 |--------|------|-----|
 | Per-tick evaluate | Simple | CPU heavy |
-| Coalesce ticks | Cheaper | Less precise |
+| Coalesce ticks | Lower CPU | **Only** if product accepts **less precision** |
 | DB pull each tick | Fresh | Slow |
 | Local cache + TTL | Fast | Staleness |
 
@@ -415,7 +451,7 @@ Name **partitioned stream**, **FSM**, **outbox**, **breaker** on the diagram.
 | Pick | Trade |
 |------|--------|
 | Evaluate every tick | Simple vs **CPU** at scale |
-| Coalesce ticks | Cheaper vs **precision** |
+| Coalesce ticks | Lower CPU vs **precision**—**product** must **opt in** |
 
 <a id="say-voice-10"></a>
 #### Human interaction (design patterns, data structures & best practices)
@@ -443,7 +479,7 @@ Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Co
 | **Define crossing vs tick** early | 10 minutes on Kafka internals first |
 | **Name cost** for SMS | Ignoring provider limits |
 | **Checkpoint** after diagram | One linear script |
-| **Default dedupe policy** | “We’ll handle duplicates somehow” |
+| **Default dedupe** + **say user journey once** | “We’ll handle duplicates somehow” |
 | **Time-box** | Every channel deep dive |
 
 **60-minute sketch (flex):** clarify+FR+NFR ~8–12 · scale+APIs ~8–12 · architecture ~8–12 · **deep dive ~15–22** · scale→monitoring ~10–15 · patterns+close ~5–8.
@@ -473,6 +509,6 @@ Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Co
 
 | Beat | Say it like this in the room |
 |------|------------------------------|
-| **Recap** | “**Ticks** → **partitioned log** by **symbol** → **matchers** + **FSM** → **dedupe/rate limit** → **outbox** → **channel workers** with **retry/DLQ**; **hot symbols** isolated; **SMS** cost-aware.” |
+| **Recap** | “**User journey**: **rule** → **ticks** → **cross** → **notify** + **cooldown**. **Ticks** → **partitioned log** → **matchers** + **FSM** → **dedupe** → **outbox** → channels; **hot symbol** / **SMS limits** first bottlenecks; **coalesce** only if **product** trades precision for CPU.” |
 
 ---
