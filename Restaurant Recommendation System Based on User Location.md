@@ -4,13 +4,17 @@
 
 ## 1. Clarify requirements
 
-### 1.0 Live flow
+### 1.0 Live flow (how to open and steer)
 
 <a id="live-flow-open"></a>
 
 **Opening (~once):** *“I’ll treat this as **ranking under latency**: **geo eligibility**, **personalization**, **cold start**, **experiments**; then **features**, **serving**, **architecture**. **Pause after the diagram**—**features**, **fairness**, or **infra**?”*
 
 **Thinking transitions:** *“Same **read funnel** as homepage—**candidates** capped before **model**.”* (See [11-hld-uber-eats-homepage.md](./11-hld-uber-eats-homepage.md).)
+
+**Live rule:** **Paraphrase** §1–2 tables; don’t read every row. Go deep **only if they probe**.
+
+**When (HLD clock):** the **user-journey script** lives **[just above §4](#user-journey-reco-25)**—say it **once** immediately **before** the architecture diagram so the feed is **user-first**. Optional: **one clause** in clarify if you opened model-first.
 
 <a id="say-1-questions-human"></a>
 ### 1.1 Clarify
@@ -22,7 +26,9 @@
 | **Privacy** | “**Precise** lat vs **neighborhood** features?” |
 | **Sponsored** | “**Mixer** slot?” |
 
-### 1.2 Functional requirements (FR)
+**Micro-pauses:** *“So **retrieval** is **geo candidates**, **rank** is **model + mixer**, and **correctness** is **eligibility**—got it.”*
+
+### 1.2 Functional requirements (FR) — after alignment, say this as "what we must build"
 
 <a id="say-fr-human"></a>
 
@@ -33,7 +39,7 @@
 | **Rank** | “Score + **mixer** + **diversity** constraints.” |
 | **Log** | “**Impression/click** for **training** and **fairness** audits.” |
 
-### 1.3 Non-functional requirements (NFR)
+### 1.3 Non-functional requirements (NFR) — say as "how it must behave"
 
 | NFR | Say it like this |
 |-----|------------------|
@@ -44,11 +50,27 @@
 
 **Invariant:** “**Recommended** restaurants are always **hard-eligible** to serve the user’s **delivery context**; **rank order** may degrade.”
 
+<a id="consistency-model-reco-25"></a>
+
+## ⚖️ Consistency Model
+
+Bar-raiser thread: *“**How fresh** are recommendations?”*
+
+Say it like this:
+
+*“Recommendations are **eventually consistent**:
+
+- **Eligibility** is **always correct** (hard filter—never **ML-overridden**).  
+- **Features** may be **slightly stale** (**seconds–minutes**) for many signals—**bounded** and **observed**.  
+- **Model outputs** are designed to **tolerate** that lag (**fallback** ranker, **time-box**, **versioned** features).”*
+
 <a id="say-voice-1"></a>
+
+**Purpose:** no second “clarify lecture”—only the **handoff** from answers → design.
 
 | Beat | Say it like this |
 |------|------------------|
-| **Bridge** | “**Two-tower** or **GBDT**—interviewer picks depth; **serving** shape same.” |
+| **Bridge** | “**I’d start with GBDT** for **interpretability** and **shipping** speed; **move to two-tower** at **scale** when **retrieval** + **embedding** efficiency dominates—**serving** shape (**cap K → features → score → mixer**) stays the same.” |
 | **Core split** | “**Offline training** vs **online feature log** vs **real-time** retrieval.” |
 
 <a id="key-insight-say-early"></a>
@@ -96,6 +118,21 @@
 
 ## 4. High-level architecture
 
+<a id="user-journey-reco-25"></a>
+
+### 👤 User journey (say once—before this diagram)
+
+*“**User opens app** → system **fetches nearby** restaurants → **filters eligible** → **ranks** with **personalization** → **returns feed**.
+
+So:
+
+- **retrieval** = **geo** candidates  
+- **ranking** = **ML** + **mixer**  
+- **correctness** = **eligibility**.”*
+
+---
+
+
 <a id="say-voice-4"></a>
 
 ```mermaid
@@ -118,8 +155,16 @@ flowchart LR
 | Phase | Ship |
 |-------|------|
 | **1** | Heuristic rank |
-| **2** | Logged **features** + **batch** model |
-| **3** | **Two-tower** + **online** learning |
+| **2** | **GBDT** + logged **features** + **batch** train (default **interpretable** path) |
+| **3** | **Two-tower** + **online** learning (**after** GBDT baseline proves **traffic**) |
+
+---
+
+<a id="ux-awareness-reco-25"></a>
+
+## 👤 UX Awareness
+
+If the feed feels **repetitive** or **biased**, **trust** drops—so we **enforce** **diversity** and **exploration** slots in the **mixer** (and **watch** impression share for **cold** merchants). Pair with **transparent** “why” only if product wants it—**never** at the cost of **p99**.
 
 ---
 
@@ -168,7 +213,7 @@ sequenceDiagram
 | Choice | Trade |
 |--------|--------|
 | **Heavy personalization** | Engagement vs **filter bubble** |
-| **Two-tower** | Scale vs **freshness** of **cross** terms |
+| **GBDT → two-tower** | **GBDT** first for **debuggability** / **ops**; **two-tower** when **candidate scale** + **latency** force **approximate** retrieval—**cost** is **complexity** + **freshness** of **cross** terms |
 
 ---
 
@@ -192,12 +237,16 @@ sequenceDiagram
 
 ---
 
-## Closing notes
+## Closing notes (where wrap-up human interaction lives)
+
+Endgame is **short**, **confident**, and **conversational**: drive the wrap from [Bar-raiser](#bar-raiser-follow-ups), [Communication (do vs avoid)](#communication-do-vs-avoid), and [60-second close](#60-second-close)—not a second full design pass.
 
 <a id="communication-do-vs-avoid"></a>
 
-| Do | Avoid |
-|----|--------|
+### Communication (do vs avoid)
+
+| Do (sounds senior) | Avoid (sounds rehearsed) |
+|--------------------|---------------------------|
 | **Eligibility before model** | “ML fixes bad zone” |
 | **Time-box** | 10 min on **embedding dim** |
 
@@ -208,6 +257,8 @@ sequenceDiagram
 | They ask | Say it like this |
 |----------|------------------|
 | **Counterfactual** | “**Logging policy** bias—**IPS** corrections / **randomized** buckets.” |
+| **How fresh is reco?** | “[Consistency model](#consistency-model-reco-25): **eligibility** strict; **features** **seconds–minutes** stale **bounded**; **fallback** + **deadline**.” |
+| **Filter bubble** | “[UX awareness](#ux-awareness-reco-25): **diversity** + **exploration** in **mixer**, **metrics** on **share**.” |
 
 ---
 
@@ -215,6 +266,6 @@ sequenceDiagram
 
 | Beat | Say it like this |
 |------|------------------|
-| **Recap** | “**Geo cap K** → **features** → **model under deadline** → **mixer**; **eligibility** hard; **offline/online** split; **obs** on **tail** + **fairness**.” |
+| **Recap** | “**Journey**: open → nearby → **eligible** → rank → feed. **Consistency**: **hard eligibility**; **feature lag** OK **bounded**; **tolerate** in model + **fallback**. **Model path**: **GBDT** first → **two-tower** at scale. **UX**: **diversity** / **exploration** for **trust**.” |
 
 ---
