@@ -2,11 +2,27 @@
 
 <a id="interview-spine-nine-steps"></a>
 
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+
+
+
 ## 1. Clarify requirements
 
 ### 1.0 Live flow (how to open and steer)
 
 <a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “Messaging is **per-conversation order**, **dedupe**, and **push**—E2E is a **scope fork**, I’ll ask before I pretend.”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
 
 **Opening (~once):** *“I’ll align on **E2E vs server-visible**, **1:1 vs groups**, **retention**; then **scale**, **APIs + storage**, **architecture**, and **send message** end-to-end. I’ll **pause after the diagram**—depth on **ordering**, **fan-out**, or **WS reliability**?”*
 
@@ -27,6 +43,18 @@
 | **Media** | “Max **payload** size, malware scan—anything that changes upload path?” |
 
 **Micro-pauses:** *“So **ordering is per chat** via **server seq**, and **`client_msg_id`** handles dedupe.”*
+
+#### Human interaction (clarify requirements — think out loud & evolve scope)
+
+**Habit:** *“Messaging is **ordering + delivery + presence**—I separate **what must be linear** from what can be **best-effort**.”*
+
+**Live:** *“Do we need **E2E encryption** in scope? **Multi-device** per user? **Groups** vs **1:1 only**? Those three change **fan-out** and **keying**.”*
+
+| Stage | Assume | Evolve when… |
+|-------|--------|----------------|
+| **v1** | **Server-assigned seq**, **at-least-once** ingest, **WS** + **push** | Product needs **receipts** |
+| **v2** | **Presence**, **typing**, **media** offload to blob | UX richness |
+| **v3** | **Sharding** by `chat_id`, **CRDT**-style edits (if docs) | Extreme group size |
 
 ### 1.2 Functional requirements (FR) — after alignment, say this as “what we must build”
 
@@ -162,7 +190,18 @@
 ## 3. APIs and data model
 
 <a id="say-voice-3"></a>
-#### Human interaction (APIs & data model)
+
+### 3.0 Core entities (who owns what — say before API tables)
+
+| Entity | Owns / lifecycle (one line) |
+|--------|-----------------------------|
+| **User / Device** | Sessions, **WS** presence; **AuthN** at connect. |
+| **Chat** | Membership roster; **shard** soul for writes. |
+| **Message** | **Immutable** row keyed by **`(chat_id, server_seq)`**; body or **blob ref**. |
+| **Timeline / Inbox pointer** | Per-user **read cursor** + **delivery state** (can be **separate** store). |
+| **Media object** | **Pre-signed** upload; **virus scan** async; **metadata** on message. |
+
+#### Human interaction (APIs & data model — API design + contracts)
 
 **Habit:** *“**WS** for live; **REST** for history; **keys** are `(chat_id, server_seq)`.”*
 
@@ -258,7 +297,9 @@ flowchart TB
 ## 5. Deep dive: critical flow
 
 <a id="say-voice-5"></a>
-#### Human interaction (deep dive — critical flow)
+#### Human interaction (deep dive — critical flow, optimizations & evolution)
+
+**Live (evolution):** *“**Default**: **append** message → **assign seq** → **fan-out** pointers to recipients’ timelines. **Evolve**: **gossip** read receipts batched, **edge** connection coalescing, **hot chat** isolation shard.”*
 
 **Habit:** *“Trace **SendMessage** like the sequence diagram—no ACK fairy tales.”*
 
@@ -465,6 +506,8 @@ Say **where** each pattern lives—registry, outbox, idempotent consumer—not a
 #### Human interaction (design patterns, data structures & best practices)
 
 **Habit:** *“**Registry**, **outbox/WAL**, **idempotent consumer**, **circuit breaker**—one line each.”*
+
+**Verbatim (drive the room in ~40s):** *“**Connection registry** maps user to gateway for push; **outbox or WAL** after DB commit so we never enqueue a message we didn’t persist; **idempotent delivery workers** for at-least-once; **circuit breaker** and **bulkhead** on DB vs push path; **state machine** on message lifecycle; **Strategy** for WS vs long-poll; **`(chat_id, server_seq)`** ordering with **`client_msg_id`** dedupe; **keyset** pagination for history catch-up.”*
 
 **Live:** **at most four** patterns tied to boxes; then stop.
 

@@ -2,11 +2,27 @@
 
 <a id="interview-spine-nine-steps"></a>
 
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+
+
+
 ## 1. Clarify requirements
 
 ### 1.0 Live flow
 
 <a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “Surge is **signals → smooth → versioned multiplier**—I’ll lead with **trust** (hysteresis) not clever ML.”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
 
 **Opening (~once):** *“I’ll align on **geo unit** (hex vs zone), **inputs** (supply/demand/exog), **staleness vs fairness**, and **UX cap**; then **compute pipeline**, **serving**, **architecture**. **Pause after the diagram**—**algorithm**, **cache**, or **incidents**?”*
 
@@ -27,9 +43,25 @@
 | **Cold start** | “New city—**defaults**?” |
 | **Eats vs Rides** | “Same engine or **separate**?” |
 
+**Micro-pauses:** *“So **quotes** carry **`surge_version`**; **serving** can be **stale** but **money** can’t be **silent retroactive**.”*
+
+#### Human interaction (clarify requirements — think out loud & evolve scope)
+
+**Habit:** *“Surge is a **published policy surface**—I clarify **objective**, **caps**, and **mid-trip rules** before I pick ML.”*
+
+| Stage | Default | Evolve when… |
+|-------|---------|----------------|
+| **v1** | **Rules + hysteresis + caps** + **versioned** writes | Trust + debuggability |
+| **v2** | **Better signals** + **shadow** formulas | Data quality proven |
+| **v3** | **ML layer** + multi-objective + **A/B** | Org maturity |
+
 ### 1.2 Functional requirements (FR)
 
 <a id="say-fr-human"></a>
+
+#### Human interaction (FR — after alignment)
+
+**Habit:** *“**Compute**, **serve**, **audit**—three FR pillars.”*
 
 | FR area | Say it like this |
 |---------|-------------------|
@@ -44,6 +76,12 @@
 - **Fare service** consumes surge for **estimate** and **final** (see [22-hld-eta-fare-estimation.md](./22-hld-eta-fare-estimation.md)).
 
 ### 1.3 Non-functional requirements (NFR)
+
+<a id="say-nfr-human"></a>
+
+#### Human interaction (NFR — how it must behave)
+
+**Live:** *“Reads are **cheap**; recompute is **async**; **fairness** means **anti-oscillation**—not only ‘ML accuracy’.”*
 
 | NFR | Say it like this |
 |-----|------------------|
@@ -80,6 +118,10 @@
 
 <a id="say-voice-2"></a>
 
+#### Human interaction (estimate scale)
+
+**Live:** *“**Millions** of cells but **sparse** updates—**tiered recompute** is how the cost curve bends.”*
+
 | Dimension | Illustrative |
 |-----------|----------------|
 | Cells globally | **Millions** active; **hot** subset recomputed often |
@@ -92,6 +134,19 @@
 ## 3. APIs and data model
 
 <a id="say-voice-3"></a>
+
+### 3.0 Core entities (who owns what — say before API tables)
+
+| Entity | Owns / lifecycle (one line) |
+|--------|-----------------------------|
+| **SignalRollup** | **Windowed** counts/features per **cell/product**—**OLAP** or stream agg. |
+| **SurgeRecord** | **Versioned** multiplier row—**immutable** history for audit. |
+| **QuoteArtifact** | Embeds **`surge_version`**—owned by **Fare** service. |
+| **Policy / Formula** | **Versioned** config; **kill switch** to rollback. |
+
+#### Human interaction (API design — versioned reads & internal triggers)
+
+**Live:** *“**GET surge** returns **multiplier + version**; **Fare** persists that **version** on quotes; internal **recompute** is **batch** or **stream-triggered**, never on rider **critical path**.”*
 
 ### 3.1 APIs
 
@@ -204,9 +259,11 @@ flowchart LR
 ## 5. Deep dive: compute + serve
 
 <a id="say-voice-5"></a>
-#### Human interaction (deep dive)
+#### Human interaction (deep dive — critical flow, optimizations & evolution)
 
 **Habit:** *“**Window** → **policy** → **version write** → **quote read**—tie [⚖️ consistency](#consistency-model-anchor) and [🚦 inputs](#input-quality-backpressure) if they probe.”*
+
+**Live (evolution):** *“**v1**: rules + hysteresis + **tiered** cell updates. **v2**: shadow **ML** + better dashboards. **v3**: multi-objective with **strong** audit—still **version** everything.”*
 
 <a id="bottleneck-anchor-once"></a>
 ### 🎯 Bottleneck Anchor
@@ -232,6 +289,10 @@ sequenceDiagram
 
 ## 6. Scaling and bottlenecks
 
+#### Human interaction (scaling & bottlenecks)
+
+**Live:** *“Don’t **recompute the planet** every tick—**hierarchical** cells + **skip stable** regions; **jitter** cadence against **herd**.”*
+
 | Risk | Mitigation |
 |------|------------|
 | **All-cell recompute** | **Tiered**: metro → hex; **skip** stable cells |
@@ -242,6 +303,10 @@ sequenceDiagram
 
 ## 7. Reliability and failure handling
 
+#### Human interaction (reliability & failure handling)
+
+**Live:** *“**Degrade** to **last good** with **max staleness**; **kill switch** formula; **never** silently rewrite **old quotes**—[⚖️ consistency](#consistency-model-anchor).”*
+
 - **Engine down:** **last good** multiplier with **max age**; **fallback** to **1.0** if expired (product).  
 - **Bad deploy:** **kill switch** to formula v-1.  
 - **Poison signals:** fall back to **last stable** window per [🚦 Input Quality](#input-quality-backpressure); **alert** on anomaly rate.  
@@ -250,6 +315,10 @@ sequenceDiagram
 ---
 
 ## 8. Tradeoffs and alternatives
+
+#### Human interaction (tradeoffs & alternatives)
+
+**Live:** *“**Finer geo** costs compute; **personalized** surge can **hurt trust**; **ML v1** on **dirty** signals is a **liability**—I’d default **rules**.”*
 
 | Choice | Trade |
 |--------|--------|
@@ -261,6 +330,10 @@ sequenceDiagram
 
 ## 9. Monitoring, observability, and security
 
+#### Human interaction (monitoring, observability & security)
+
+**Habit:** *“I’d page on **oscillation rate** and **quote/trip version mismatch**—those are **money + trust**.”*
+
 **Metrics:** multiplier **distribution**, **churn** rate version-to-version, **ETA** under surge, **quote** vs **trip** reconciliation diff.  
 **Security:** **no** user-specific surge **leak** across sessions if policy forbids.
 
@@ -268,20 +341,33 @@ sequenceDiagram
 
 ## 10. Design patterns, data structures & best practices
 
-| Pattern | Map |
-|---------|-----|
-| **Lambda architecture** | Stream + batch reconcile |
-| **Feature flags** | Formula rollout |
-| **Versioned config** | Policy caps |
+#### Human interaction (design patterns, data structures & best practices)
+
+**Verbatim (say on the board, ~30s):** *“**Lambda**—stream for **fast** multipliers, batch for **reconciliation**; **versioned config** and **feature flags** for safe rollout; **ring buffer** or sliding windows for **signal smoothing**; **hysteresis** so we don’t oscillate; **idempotent** materialized **cell state** with **ETag** or version on quotes; **audit log** per cell window for **regulatory** replay.”*
+
+**Live:** *“**Lambda**, **versioned config**, **feature flags**, **ring buffer**—pick **four** max on the diagram.”*
+
+| Pattern / DS | Where | One interview line |
+|----------------|------|----------------------|
+| **Lambda (stream + batch)** | Signals → multiplier | “Stream is **fresh**; batch **fixes** drift and accounting.” |
+| **Ring buffer / sliding window** | Demand smoothing | “One bad tick shouldn’t move the **multiplier**.” |
+| **Hysteresis + caps** | Policy engine | “**Enter/exit** thresholds kill **flicker**.” |
+| **Versioned config + flags** | Control plane | “**Kill switch** to formula **v-1** without redeploy panic.” |
+| **Materialized cell state** | Read path | “Quote path does **lookup**, not recomputing the world.” |
+| **Immutable quote linkage** | Trip / pricing | “**`surge_version`** on the artifact—no **silent** retro-pricing.” |
 
 <a id="say-voice-10"></a>
-**Live:** max **four** patterns.
+**Live:** pick **five or six** rows; lead with **trust** (hysteresis + version).
 
 ---
 
 ## Closing notes
 
 <a id="communication-do-vs-avoid"></a>
+
+#### Human interaction (closing notes)
+
+**Live:** *“**Version** on quotes, **hysteresis** on policy, **tiered** compute—surge is **trust** engineering.”*
 
 | Do | Avoid |
 |----|--------|
@@ -294,6 +380,8 @@ sequenceDiagram
 
 ## Bar-raiser follow-ups
 
+#### Human interaction (bar-raiser follow-ups)
+
 | They ask | Say it like this |
 |----------|------------------|
 | **Pooling** | “**Cross-side** externalities—sometimes **objective** is **system throughput**, not single-trip revenue.” |
@@ -304,6 +392,8 @@ sequenceDiagram
 ---
 
 ## 60-second close
+
+#### Human interaction (60-second close)
 
 | Beat | Say it like this |
 |------|------------------|

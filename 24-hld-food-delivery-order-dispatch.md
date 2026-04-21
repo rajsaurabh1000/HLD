@@ -2,11 +2,27 @@
 
 <a id="interview-spine-nine-steps"></a>
 
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+
+
+
 ## 1. Clarify requirements
 
 ### 1.0 Live flow (how to open and steer)
 
 <a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “Order dispatch is **state machines + assign lease**—I’ll own **courier staleness** and **double dispatch**.”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
 
 **Opening (~once):** *“I’ll align **merchant accept**, **prep time**, **courier assignment**, and **batching**; then **state machine**, **APIs**, **architecture**, and **dispatch deep dive**. **Pause after the diagram**—**courier matching**, **SLA**, or **failures**?”*
 
@@ -28,9 +44,23 @@
 
 **Micro-pauses:** *“So **order** is **OLTP + pay**; **dispatch** is **async**; both paths **meet** at **pickup**—got it.”*
 
+#### Human interaction (clarify requirements — think out loud & evolve scope)
+
+**Habit:** *“Three clocks: **promise**, **prep**, **travel**—I align **merchant behavior** and **stacking** before I draw dispatch.”*
+
+| Stage | Default | Evolve when… |
+|-------|---------|----------------|
+| **v1** | Single courier, **READY**-triggered offer | Simple |
+| **v2** | **Prep-aware** send-to-store + **TTL** offers | Utilization pressure |
+| **v3** | **Stacked** batches + **ML** ETA—still **[commit](#commit-boundary-food-dispatch)** gated | Scale |
+
 ### 1.2 Functional requirements (FR) — after alignment, say this as "what we must build"
 
 <a id="say-fr-human"></a>
+
+#### Human interaction (FR — after alignment)
+
+**Habit:** *“Say **order**, **merchant**, **dispatch job**, **courier**—who owns each **state** edge.”*
 
 | FR area | Say it like this |
 |---------|-------------------|
@@ -46,6 +76,12 @@
 - **Courier lifecycle**: offer → accept → at store → picked up → delivered.
 
 ### 1.3 Non-functional requirements (NFR) — say as "how it must behave"
+
+<a id="say-nfr-human"></a>
+
+#### Human interaction (NFR — how it must behave)
+
+**Live:** *“**Place order** stays **thin**; **dispatch** scales **async**; **consistency** on **ASSIGNED** is **non-negotiable**.”*
 
 | NFR | Say it like this |
 |-----|------------------|
@@ -110,6 +146,10 @@ Say it like this:
 
 <a id="say-voice-2"></a>
 
+#### Human interaction (estimate scale)
+
+**Live:** *“**Dispatch decisions/sec** per metro drive **zone sharding**—orders/day sets **OLTP** sizing.”*
+
 | Dimension | Illustrative |
 |-----------|----------------|
 | Orders / day / metro | **100k+** large market |
@@ -120,6 +160,19 @@ Say it like this:
 ## 3. APIs and data model
 
 <a id="say-voice-3"></a>
+
+### 3.0 Core entities (who owns what — say before API tables)
+
+| Entity | Owns / lifecycle (one line) |
+|--------|-----------------------------|
+| **Order** | **Durable** cart + **pricing snapshot** + **promise**—**OLTP**. |
+| **Merchant session** | **Accept/reject**, **prep** signals—integrates via **webhooks**. |
+| **DispatchJob** | **Zone**-partitioned work: offers, retries, **TTL**. |
+| **Courier** | **Availability** index (eventually consistent) vs **committed** assignments. |
+
+#### Human interaction (API design — webhooks, idempotency, internal assign)
+
+**Live:** *“Merchant **callbacks** are **idempotent**; **`POST dispatch/assign`** is internal; **ASSIGNED** is **atomic** with **[commit rules](#commit-boundary-food-dispatch)**.”*
 
 ### 3.1 APIs
 
@@ -154,6 +207,12 @@ So:
 ## 4. High-level architecture
 
 <a id="say-voice-4"></a>
+
+#### Human interaction (high-level architecture / HLD)
+
+**Habit:** *“Say [user journey](#user-journey-food-dispatch) **once**, then: **Order** pays, **Dispatch** offers, **Courier** commits.”*
+
+**Live:** *“**Zone** queues absorb **hotspot**; **backpressure** caps offers before **courier app** melts ([§6](#6-scaling-and-bottlenecks)).”*
 
 ```mermaid
 flowchart TB
@@ -191,6 +250,12 @@ If **dispatch** slips (no courier, queue depth, kitchen delay), **proactively** 
 
 <a id="say-voice-5"></a>
 
+#### Human interaction (deep dive — critical flow, optimizations & evolution)
+
+**Habit:** *“Narrate **READY → enqueue → score → offer TTL → accept → ASSIGNED**.”*
+
+**Live (evolution):** *“**v1**: nearest courier. **v2**: **prep-aware** send-to-store. **v3**: **stacking** with **hard** caps—still **[re-check courier](#courier-state-food-dispatch)** on accept.”*
+
 <a id="bottleneck-anchor-once"></a>
 ### 🎯 Bottleneck Anchor
 
@@ -216,6 +281,10 @@ sequenceDiagram
 
 ## 6. Scaling and bottlenecks
 
+#### Human interaction (scaling & bottlenecks)
+
+**Live:** *“**Hot zone** → shard dispatch; **webhook dupes** → **idempotency**; **rush** → **[backpressure](#backpressure-food-dispatch)** on offers before dropping **assignability**.”*
+
 | Risk | Mitigation |
 |------|------------|
 | **Hot zone** | Shard dispatchers; **courier** caps |
@@ -235,12 +304,20 @@ If **dispatch** load **spikes** (rush, incident, bad deploy):
 
 ## 7. Reliability and failure handling
 
+#### Human interaction (reliability & failure handling)
+
+**Live:** *“**No courier** path is **product**: escalate incentive, **expand** radius, **honest** push—see [UX](#ux-awareness-food-dispatch).”*
+
 - **No courier:** **escalate** fee, **expand radius**, **customer comms**.  
 - **Merchant ghost:** **timeout** → cancel path.
 
 ---
 
 ## 8. Tradeoffs and alternatives
+
+#### Human interaction (tradeoffs & alternatives)
+
+**Live:** *“**Early assign** saves kitchen idle time but can **strand** couriers; **zone dispatch** is my **default** for **blast radius**.”*
 
 | Choice | Trade |
 |--------|--------|
@@ -251,6 +328,10 @@ If **dispatch** load **spikes** (rush, incident, bad deploy):
 
 ## 9. Monitoring, observability, and security
 
+#### Human interaction (monitoring, observability & security)
+
+**Habit:** *“**ready-to-assign** is the **canary** for marketplace health.”*
+
 **Metrics:** **ready-to-assign** lag, **assign-to-pickup**, **lateness %**, **stack rate**.  
 **Security:** **AuthZ** on **order** events; **anti-tamper** on **proof** of delivery.
 
@@ -258,18 +339,31 @@ If **dispatch** load **spikes** (rush, incident, bad deploy):
 
 ## 10. Design patterns, data structures & best practices
 
-| Pattern | Map |
-|---------|-----|
-| **Saga** | Order + pay + dispatch |
-| **State machine** | Order + courier |
-| **Priority queue** | Jobs by **promise** time |
+#### Human interaction (design patterns, data structures & best practices)
+
+**Verbatim (say on the board, ~30s):** *“**Saga** with **outbox** across **payment**, **merchant accept**, and **dispatch**; **dual state machines** on **order** and **courier** with explicit **ready-to-assign**; **priority queue** of jobs by **promise time** and **batching** for **stacked** deliveries; **idempotency** on assign; **zone-based** shard with **async** cross-zone **rebalance**.”*
+
+**Live:** *“**Saga**, **state machines**, **priority queue**—then I’ll say **idempotency** on assign if they probe **double dispatch**.”*
+
+| Pattern / DS | Where | One interview line |
+|----------------|------|----------------------|
+| **Saga + outbox** | Checkout / dispatch | “**Money** and **assignment** don’t rely on **best-effort** RPC.” |
+| **State machine (order)** | Order svc | “**Illegal** transitions are **bugs**, not ‘edge cases’.” |
+| **State machine (courier)** | Courier svc | “**Stale courier** is a **first-class** failure mode.” |
+| **Priority queue / heap** | Dispatch worker | “**SLA breach** risk sorts higher than **FIFO** alone.” |
+| **Batching / VRP-lite** | Route | “**Stack** orders when **ETA** slack allows—lift utilization.” |
+| **Idempotency + lease** | Assign | “**Double assign** is **worse** than slow assign—I **lease** the job.” |
 
 <a id="say-voice-10"></a>
-**Live:** max **four** patterns.
+**Live:** pick **five or six** rows; own **commit boundary** + **courier staleness**.
 
 ---
 
 ## Closing notes (where wrap-up human interaction lives)
+
+#### Human interaction (closing notes)
+
+**Live:** *“Own **[commit](#commit-boundary-food-dispatch)**, **[courier staleness](#courier-state-food-dispatch)**, and **[backpressure](#backpressure-food-dispatch)**—that’s the SDE-2 story.”*
 
 Endgame is **short**, **confident**, and **conversational**: drive the wrap from [Bar-raiser](#bar-raiser-follow-ups), [Communication (do vs avoid)](#communication-do-vs-avoid), and [60-second close](#60-second-close)—not a second full design pass.
 
@@ -286,6 +380,8 @@ Endgame is **short**, **confident**, and **conversational**: drive the wrap from
 
 ## Bar-raiser follow-ups
 
+#### Human interaction (bar-raiser follow-ups)
+
 | They ask | Say it like this |
 |----------|------------------|
 | **Robot / locker** | “Different **terminal state** + **PIN** handoff—same **saga** shape.” |
@@ -295,6 +391,8 @@ Endgame is **short**, **confident**, and **conversational**: drive the wrap from
 ---
 
 ## 60-second close
+
+#### Human interaction (60-second close)
 
 | Beat | Say it like this |
 |------|------------------|

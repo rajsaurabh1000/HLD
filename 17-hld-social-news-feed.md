@@ -2,11 +2,27 @@
 
 <a id="interview-spine-nine-steps"></a>
 
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+
+
+
 ## 1. Clarify requirements
 
 ### 1.0 Live flow (how to open and steer)
 
 <a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “Feed is **hybrid fan-out + read path rank**—I’ll name a **celebrity cutoff** so scale isn’t hand-wavy.”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
 
 **Opening (~once):** *“I’ll align on **ranked vs chrono**, **celebrity threshold**, **blocks/safety**, **live updates** (WS vs poll); then **scale**, **APIs + fan-out policy**, **architecture**, and **GET /feed**. I’ll **pause after the diagram**—depth on **fan-out**, **read path + rank**, or **failure**?”*
 
@@ -30,6 +46,18 @@
 | **Region** | “**Multi-region** from day one?” |
 
 **Micro-pauses:** *“So timelines store **ids**; bodies **hydrate** separately; celebs don’t get **O(followers)** push.”*
+
+#### Human interaction (clarify requirements — think out loud & evolve scope)
+
+**Habit:** *“Feed is **fan-out vs fan-in**—I clarify **celebrity scale**, **ordering** (strict vs best-effort), and **ranking** budget.”*
+
+**Live:** *“**Global** reverse chronological only, or **ranked**? **Cross-region**? **Stories** ephemeral?”*
+
+| Stage | Assume | Evolve when… |
+|-------|--------|----------------|
+| **v1** | **Pull** model + **fan-out-on-write** for normal users | Simple |
+| **v2** | **Hybrid**: **fan-in** for celebs + **merge** | Hot accounts |
+| **v3** | **ML rank** + **cache** pools + **Graph** for social proof | Engagement SLO |
 
 ### 1.2 Functional requirements (FR) — after alignment, say this as “what we must build”
 
@@ -164,7 +192,18 @@
 ## 3. APIs and data model
 
 <a id="say-voice-3"></a>
-#### Human interaction (APIs & data model)
+
+### 3.0 Core entities (who owns what — say before API tables)
+
+| Entity | Owns / lifecycle (one line) |
+|--------|-----------------------------|
+| **User** | Identity; **follow graph** edges (outbox of follow events). |
+| **Post** | **Immutable** content ref + **author** + **ACL** / visibility. |
+| **Timeline shard** | Ordered **post ids** per user partition—**fan-out** target. |
+| **Ranker / mixer** (optional) | **Reorders** **candidate ids** under **deadline**. |
+| **Hydration bundle** | **Batch** fetch bodies/authors for **GET feed**. |
+
+#### Human interaction (APIs & data model — API design + contracts)
 
 **Habit:** *“**Graph**, **post**, **timeline ids**—three stores.”*
 
@@ -269,7 +308,9 @@ flowchart TB
 ## 5. Deep dive: read feed path
 
 <a id="say-voice-5"></a>
-#### Human interaction (deep dive — critical flow)
+#### Human interaction (deep dive — critical flow, optimizations & evolution)
+
+**Live (evolution):** *“**Default**: **post** → **fan-out** pointers into followers’ **timeline shards**. **Evolve**: **celebrity** **pull**-merge, **read-through** cache for **hydration**, **rank** as **two-stage** over **candidate ids**.”*
 
 **Habit:** *“**GET /feed** like the sequence diagram—**deadline** on rank.”*
 
@@ -486,6 +527,8 @@ Tie **hybrid fan-out**, **CQRS/materialized view**, **cache-aside**, **timeout+f
 #### Human interaction (design patterns, data structures & best practices)
 
 **Habit:** *“**Hybrid fan-out**, **materialized timeline**, **Strategy** rankers, **Decorator** mixer.”*
+
+**Verbatim (drive the room in ~40s):** *“**Hybrid fan-out** with an explicit **celebrity cutoff**—normal users get push fan-out, celebs are **pull** or partial materialization; **CQRS** between post truth and **per-user timeline** read model; **event-driven** workers; **cache-aside** for hot timelines; **bulkhead** rank vs fetch; **timeout + fallback** to recency-only; **append-only timeline** lists, **min-heap** merge on pull, **Bloom** for seen approx.”*
 
 **Live:** **at most four** patterns on the diagram; then stop.
 

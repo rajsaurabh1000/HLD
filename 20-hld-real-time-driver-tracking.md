@@ -2,11 +2,27 @@
 
 <a id="interview-spine-nine-steps"></a>
 
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+
+
+
 ## 1. Clarify requirements
 
 ### 1.0 Live flow
 
 <a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “Tracking is **telemetry ≠ trip**—pins are **eventual**, safety and **authZ** on channels aren’t.”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
 
 **Opening (~once):** *“I’ll align on **update rate**, **who sees whom** (rider vs ops), **map matching**, and **privacy**; then **ingest**, **fan-out**, **storage**, and **architecture**. **Pause after the diagram**—**WebSockets**, **write path**, or **regional**?”*
 
@@ -26,9 +42,27 @@
 | **Accuracy** | “**Snap to road**—in this service or **maps**?” |
 | **History** | “How long is **breadcrumb** retention—**minutes** vs **days** (compliance)?” |
 
+**Micro-pauses:** *“So **pins** can be **eventual**, but **Trip** correctness lives elsewhere; I’ll **downsample** before I hurt **WS**.”*
+
+#### Human interaction (clarify requirements — think out loud & evolve scope)
+
+**Habit:** *“I’m separating **telemetry hot path** from **trip OLTP**—that one sentence saves twenty minutes of wrong boxes.”*
+
+**Live:** *“Confirm **Hz**, **who consumes**, **retention**, and **snap-to-road** ownership—those decide **Kafka vs** smaller log and how much we **coalesce**.”*
+
+| Stage | Default | Evolve when… |
+|-------|---------|----------------|
+| **v1** | HTTP batch + **Redis latest** + **Kafka** log | Works at moderate scale |
+| **v2** | **WS** fan-out + **per-trip** channel caps | Rider p99 tightens |
+| **v3** | **Edge ingest POP** + regional fan-out | Cross-region / mega events |
+
 ### 1.2 Functional requirements (FR)
 
 <a id="say-fr-human"></a>
+
+#### Human interaction (FR — after alignment)
+
+**Habit:** *“Three verbs: **ingest**, **fan-out**, **retain**—everything else is optional.”*
 
 | FR area | Say it like this |
 |---------|-------------------|
@@ -43,6 +77,12 @@
 - Feed **matching** / **ETA** with **latest** snapshot (see also [19-hld-ride-matching-driver-dispatch.md](./19-hld-ride-matching-driver-dispatch.md)).
 
 ### 1.3 Non-functional requirements (NFR)
+
+<a id="say-nfr-human"></a>
+
+#### Human interaction (NFR — how it must behave)
+
+**Live:** *“**Privacy** is **AuthZ** on **subscribe** + **TTL**; **latency** is **viewer p99**, not ingest RPS vanity.”*
 
 | NFR | Say it like this |
 |-----|------------------|
@@ -78,6 +118,12 @@
 
 <a id="say-voice-2"></a>
 
+#### Human interaction (estimate scale)
+
+**Habit:** *“Multiply **drivers × Hz × subscribers**—that’s the **fan-out** bomb.”*
+
+**Live:** *“I’ll quote **updates/sec/region** an **order of magnitude**—correct me, I only need **partition** justification.”*
+
 | Dimension | Illustrative |
 |-----------|----------------|
 | Updates / sec / region | **100k–1M+** at Uber-scale discussion |
@@ -89,6 +135,19 @@
 ## 3. APIs and data model
 
 <a id="say-voice-3"></a>
+
+### 3.0 Core entities (who owns what — say before API tables)
+
+| Entity | Owns / lifecycle (one line) |
+|--------|-----------------------------|
+| **LocationEvent** | **Append** fact `(driver_id, seq, ts, geom, trip_id?)`—**idempotent** ingest. |
+| **LatestSnapshot** | **Fast read** “where is driver now”—**overwrite** / **versioned**. |
+| **TripChannel** | **AuthZ**-scoped fan-out to **rider/support** viewers. |
+| **IngestSession** | **Rate limit** + **device attestation** hook (if product requires). |
+
+#### Human interaction (API design — batching, idempotency, subscribe)
+
+**Live:** *“**Batch** upload from mobile; **`seq`** or **`(driver_id, client_ts)`** for dedupe; **WS** subscribe is **trip-scoped**, never **global driver** public.”*
 
 ### 3.1 APIs
 
@@ -205,9 +264,11 @@ flowchart TB
 ## 5. Deep dive: ingest → fan-out
 
 <a id="say-voice-5"></a>
-#### Human interaction (deep dive)
+#### Human interaction (deep dive — critical flow, optimizations & evolution)
 
 **Habit:** *“Walk **ingest → log → snapshot → push**; name [⚖️ eventual](#consistency-model-anchor) + [🚦 backpressure](#backpressure-handling) if they push.”*
+
+**Live (evolution):** *“**v1**: bigger batches + long poll. **v2**: **Kafka** + **Redis latest** + **WS** with **coalesce**. **v3**: **edge** ingest to cut RTT—still **trip AuthZ** at core.”*
 
 <a id="bottleneck-anchor-once"></a>
 ### 🎯 Bottleneck Anchor
@@ -236,6 +297,10 @@ sequenceDiagram
 
 ## 6. Scaling and bottlenecks
 
+#### Human interaction (scaling & bottlenecks)
+
+**Live:** *“First break is almost always **connection count** or **consumer lag**—**shard** WS, **scale** processors horizontally, **cap** per-trip push rate.”*
+
 | Risk | Mitigation |
 |------|------------|
 | **WS connection storms** | **Shard** connection gateways; **STUN**/edge |
@@ -247,6 +312,10 @@ sequenceDiagram
 
 ## 7. Reliability and failure handling
 
+#### Human interaction (reliability & failure handling)
+
+**Live:** *“**At-least-once** is fine if **`seq`** makes writes **idempotent**; **reconnect** path serves **last-known** then tail—see [UX](#ux-awareness).”*
+
 - **At-least-once** ingest → **idempotent** write by `(driver_id, seq)`.  
 - **Viewer reconnect:** send **last-known** from Redis then **live**—[👤 UX Awareness](#ux-awareness).  
 - **Partition:** **sticky routing** for WS.  
@@ -255,6 +324,10 @@ sequenceDiagram
 ---
 
 ## 8. Tradeoffs and alternatives
+
+#### Human interaction (tradeoffs & alternatives)
+
+**Live:** *“**Kafka default** buys replay; **Redis Streams** only if we admit **smaller** scale. **Server map-match** improves consistency but costs **CPU**—often **async** off hot path.”*
 
 | Choice | Trade |
 |--------|--------|
@@ -265,6 +338,10 @@ sequenceDiagram
 
 ## 9. Monitoring, observability, and security
 
+#### Human interaction (monitoring, observability & security)
+
+**Habit:** *“I’d trace **one point** through metrics: ingest ts → **Redis write** → **WS delivery**—that’s the **golden slice**.”*
+
 **Metrics:** ingest RPS, **end-to-end latency** (sample timestamp → rider receive), WS **drop rate**, **authz** denials.  
 **Security:** **mTLS** or signed tokens; **trip-scoped** channels.
 
@@ -272,20 +349,33 @@ sequenceDiagram
 
 ## 10. Design patterns, data structures & best practices
 
-| Pattern | Where |
-|---------|--------|
-| **CQRS** | Telemetry vs trip OLTP |
-| **Pub/sub** | Trip channel |
-| **Rate limit** | Per driver |
+#### Human interaction (design patterns, data structures & best practices)
+
+**Verbatim (say on the board, ~30s):** *“**CQRS**—GPS **telemetry** is **append-heavy** and **eventual**; **Trip** OLTP stays **strong** elsewhere; **Kafka** as durable **ingest log** with **downsample** and **latest-wins** into **Redis**; **pub/sub** per **trip_id** to riders over **WebSocket**; **rate limit** and **authZ** on subscribe; optional **ring buffer** on device before batch upload.”*
+
+**Live:** *“**CQRS**, **pub/sub** per trip, **ring buffer** on device, **rate limit** at ingest—only what’s on the diagram.”*
+
+| Pattern / DS | Where | One interview line |
+|----------------|------|----------------------|
+| **CQRS** | Telemetry vs trip | “Pins are **eventual**; **trip lifecycle** is not.” |
+| **Append log + replay** | Kafka | “**Bursts** and **reprocess** without losing the stream.” |
+| **Latest-value store** | Redis / cache | “Riders need **last known**, not full GPS history, on the hot path.” |
+| **Pub/sub (trip channel)** | Fan-out svc | “**AuthZ** before I put you on **`trip:{id}`**.” |
+| **Rate limit + downsample** | Ingest | “**Backpressure** is a **feature**—protect fan-out.” |
+| **Ring buffer (client)** | Driver app | “Batch and **drop** intermediate points under load.” |
 
 <a id="say-voice-10"></a>
-**Live:** max **four** patterns on diagram.
+**Live:** pick **five or six** rows; **never** put raw GPS in trip **txn** path.
 
 ---
 
 ## Closing notes
 
 <a id="communication-do-vs-avoid"></a>
+
+#### Human interaction (closing notes)
+
+**Live:** *“**Hot path** = append + latest + fan-out; **Trip** correctness isn’t here; **backpressure** is a **feature**.”*
 
 | Do | Avoid |
 |----|--------|
@@ -298,6 +388,8 @@ sequenceDiagram
 
 ## Bar-raiser follow-ups
 
+#### Human interaction (bar-raiser follow-ups)
+
 | They ask | Say it like this |
 |----------|------------------|
 | **Ghost locations** | “**Kalman** / map-match **downstream**; flag **spoof** for fraud.” |
@@ -308,6 +400,8 @@ sequenceDiagram
 ---
 
 ## 60-second close
+
+#### Human interaction (60-second close)
 
 | Beat | Say it like this |
 |------|------------------|

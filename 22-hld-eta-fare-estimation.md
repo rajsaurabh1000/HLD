@@ -2,11 +2,27 @@
 
 <a id="interview-spine-nine-steps"></a>
 
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+
+
+
 ## 1. Clarify requirements
 
 ### 1.0 Live flow
 
 <a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “ETA/fare is **routing + rules + quote artifact**—I’ll split **p99** model from **immutable** pricing.”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
 
 **Opening (~once):** *“I’ll split **ETA** (time-to-pickup, trip duration) from **fare** (rules + surge + tolls); align on **accuracy vs p99**, **pre-match vs post-match**, and **quote immutability**; then **data**, **APIs**, **architecture**. **Pause after the diagram**—**routing graph**, **ML**, or **pricing rules**?”*
 
@@ -27,9 +43,25 @@
 | **Tolls** | “In scope for **estimate**?” |
 | **Multi-stop** | “**Waypoints**?” |
 
+**Micro-pauses:** *“So **routing+traffic** can be **messy**, but **`FareQuote`** is the **legal UX artifact** with **TTL** and **versions**.”*
+
+#### Human interaction (clarify requirements — think out loud & evolve scope)
+
+**Habit:** *“I split **ETA science** from **pricing law** from **quote contract**—if we blur them, every bar-raiser question becomes chaos.”*
+
+| Stage | Default | Evolve when… |
+|-------|---------|----------------|
+| **v1** | **CH/A\*** + heuristic traffic + **rule pricing** + **quote store** | p99 acceptable |
+| **v2** | **Deadline fan-out** + **fallback ladder** + hardened traffic ingest | Tail latency |
+| **v3** | **ML traffic** + probabilistic ETAs | Signals trusted |
+
 ### 1.2 Functional requirements (FR)
 
 <a id="say-fr-human"></a>
+
+#### Human interaction (FR — after alignment)
+
+**Habit:** *“**ETA**, **fare**, **quote**—three outputs, one **composed** flow.”*
 
 | FR area | Say it like this |
 |---------|-------------------|
@@ -45,6 +77,12 @@
 - **Quote store** for **compliance** and **trip attachment**.
 
 ### 1.3 Non-functional requirements (NFR)
+
+<a id="say-nfr-human"></a>
+
+#### Human interaction (NFR — how it must behave)
+
+**Live:** *“**p99** is engineered with **deadlines** and **degradation**, not heroics; **accuracy** is measured, not assumed.”*
 
 | NFR | Say it like this |
 |-----|------------------|
@@ -80,6 +118,10 @@ Treat **ETA** and **fare** as **composed services** with a **stable quote artifa
 
 <a id="say-voice-2"></a>
 
+#### Human interaction (estimate scale)
+
+**Live:** *“**Quote QPS** is huge; **graph** is **partitioned** by region; **hot OD** cache is the **economics** of this service.”*
+
 | Dimension | Illustrative |
 |-----------|----------------|
 | Estimate QPS | **Very high** at peak |
@@ -90,6 +132,19 @@ Treat **ETA** and **fare** as **composed services** with a **stable quote artifa
 ## 3. APIs and data model
 
 <a id="say-voice-3"></a>
+
+### 3.0 Core entities (who owns what — say before API tables)
+
+| Entity | Owns / lifecycle (one line) |
+|--------|-----------------------------|
+| **FareQuote** | **Immutable** shown artifact: **inputs_hash**, **`rule_version`**, **`surge_version`**, **TTL**. |
+| **RouteResult** | Geometry + **segment** list—**Routing** service. |
+| **TrafficSnapshot** | Speeds by segment—**staleness** bounded. |
+| **PricingEvaluation** | Pure function output given **distance/time** + rules. |
+
+#### Human interaction (API design — idempotent quotes & internal batch)
+
+**Live:** *“`POST /quotes` is **idempotent** with client key; **`POST /routing/eta`** batch serves **matching**—different **SLO**.”*
 
 ### 3.1 APIs
 
@@ -207,9 +262,11 @@ flowchart TB
 ## 5. Deep dive: `POST /v1/quotes`
 
 <a id="say-voice-5"></a>
-#### Human interaction (deep dive)
+#### Human interaction (deep dive — critical flow, optimizations & evolution)
 
 **Habit:** *“Sequence the **RPCs** under a **single deadline**; land on [⚖️ immutable quote](#consistency-model-anchor) + [🚦 fallback](#latency-backpressure-control).”*
+
+**Live (evolution):** *“**v1**: parallel **RT+TR** under budget → persist quote. **v2**: **precomputed** hot corridors + **tiered** degradation metrics. **v3**: **distributional** ETAs—still **TTL** + **versions**.”*
 
 <a id="bottleneck-anchor-once"></a>
 ### 🎯 Bottleneck Anchor
@@ -240,6 +297,10 @@ sequenceDiagram
 
 ## 6. Scaling and bottlenecks
 
+#### Human interaction (scaling & bottlenecks)
+
+**Live:** *“**Hot OD** and **traffic SLO** bite first—**cache** common pairs, **bound** staleness, **shard** quote store by **time**.”*
+
 | Risk | Mitigation |
 |------|------------|
 | **Hot corridors** | **Precomputed** common OD pairs |
@@ -250,6 +311,10 @@ sequenceDiagram
 
 ## 7. Reliability and failure handling
 
+#### Human interaction (reliability & failure handling)
+
+**Live:** *“**Straggler cancel** is a **design feature**; user gets **range** or **tier-B** with honest **confidence**—better than **500**.”*
+
 - **Routing timeout:** widen to **haversine** × **city factor** + **disclaimer**—part of [🚦 fallback](#latency-backpressure-control).  
 - **Surge stale:** embed **max_age** in UX.  
 - **Idempotent** `POST /quotes` with **client key**.  
@@ -258,6 +323,10 @@ sequenceDiagram
 ---
 
 ## 8. Tradeoffs and alternatives
+
+#### Human interaction (tradeoffs & alternatives)
+
+**Live:** *“**Upfront lock** vs **metered** is a **product/legal** fork—my job is **artifact + versions**, not to hide the fork.”*
 
 | Choice | Trade |
 |--------|--------|
@@ -269,6 +338,10 @@ sequenceDiagram
 
 ## 9. Monitoring, observability, and security
 
+#### Human interaction (monitoring, observability & security)
+
+**Habit:** *“I’d track **degradation tier rate**—if it spikes, the problem is **dependency SLO**, not ‘bad ML’.”*
+
 **Metrics:** ETA error by **corridor**, quote **use rate**, **fare delta** quote vs actual, **degradation** tier usage.  
 **Security:** **Auth** quotes to **user**; **no** PII in **polyline** logs.
 
@@ -276,20 +349,33 @@ sequenceDiagram
 
 ## 10. Design patterns, data structures & best practices
 
-| DS/Pattern | Map |
-|------------|-----|
-| **CH / MLD** | Fast shortest path |
-| **TTL cache** | Hot OD |
-| **Strategy** | Pricing rules engine |
+#### Human interaction (design patterns, data structures & best practices)
+
+**Verbatim (say on the board, ~30s):** *“**Contraction hierarchies** or **multi-level Dijkstra** behind a **RoutingPort**; **TTL cache** on hot **origin–destination** pairs; **Strategy** pattern for pricing rules vs surge plug-in; **bulkhead** timeouts per map vendor; **immutable FareQuote** with **`quote_id`** and versions; **degradation ladder** when routing misses **SLO**.”*
+
+**Live:** *“**CH/MLD**, **TTL hot-OD cache**, **strategy** pricing, **bulkhead**—tie each to a **box**.”*
+
+| Pattern / DS | Where | One interview line |
+|----------------|------|----------------------|
+| **CH / MLD / A\*** | Routing engine | “Abstract behind **RoutingPort**; swap vendors without rewrite.” |
+| **TTL cache (OD matrix)** | Read path | “**P95** hits memory; **cold** path pays graph cost once.” |
+| **Strategy + rules engine** | Pricing | “**Surge** and **promos** are **pluggable**, not spaghetti **if**.” |
+| **Bulkhead + deadline** | Dependencies | “**Map** slow doesn’t block **pricing** forever.” |
+| **Immutable quote artifact** | Storage | “**`quote_id`** is the **receipt**—audit and disputes.” |
+| **Fallback ladder** | API | “**Range ETA** or **degraded** tier beats **500** to the user.” |
 
 <a id="say-voice-10"></a>
-**Live:** max **four** patterns.
+**Live:** pick **five or six** rows; lead with **quote immutability**.
 
 ---
 
 ## Closing notes
 
 <a id="communication-do-vs-avoid"></a>
+
+#### Human interaction (closing notes)
+
+**Live:** *“**Quote** is the receipt; **deadlines** create **trust** at scale.”*
 
 | Do | Avoid |
 |----|--------|
@@ -302,6 +388,8 @@ sequenceDiagram
 
 ## Bar-raiser follow-ups
 
+#### Human interaction (bar-raiser follow-ups)
+
 | They ask | Say it like this |
 |----------|------------------|
 | **Pool fare** | “**Leg allocation** from **simulated** orderings—**heavy** offline, **light** online.” |
@@ -312,6 +400,8 @@ sequenceDiagram
 ---
 
 ## 60-second close
+
+#### Human interaction (60-second close)
 
 | Beat | Say it like this |
 |------|------------------|

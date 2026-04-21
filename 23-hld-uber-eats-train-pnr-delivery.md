@@ -2,11 +2,27 @@
 
 <a id="interview-spine-nine-steps"></a>
 
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+
+
+
 ## 1. Clarify requirements
 
 ### 1.0 Live flow (how to open and steer)
 
 <a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “Train+PNR is **feasibility + versions**—rail is **adapters**, not magic in the food core.”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
 
 **Opening (~once):** *“This extends **geo delivery** with **train context**: **PNR**, **route/stations**, **arrival window**, and **handoff** at a **station**; I’ll align **eligibility** (which stops are serviceable), **timing** (prep vs dwell time), then **APIs** and **architecture**. **Pause after the diagram**—**rail data**, **ETA**, or **trust**?”*
 
@@ -29,9 +45,25 @@
 
 **Micro-pauses:** *“So **context** is **PNR + itinerary**; **eligibility** is **station feasibility**; **commit** locks a **validated window**—got it.”*
 
+#### Human interaction (clarify requirements — think out loud & evolve scope)
+
+**Habit:** *“Train mode is **homepage + logistics**—if I don’t pin **PNR trust** and **delay policy**, I’ll draw the wrong **feasibility** box.”*
+
+**Live:** *“I’m defaulting **verified PNR**; **manual** path only with **disclosure**—that’s a **product** call, not a cheat.”*
+
+| Stage | Default | Evolve when… |
+|-------|---------|----------------|
+| **v1** | Manual station + static timetable | MVP |
+| **v2** | Verified PNR + **delay stream** + feasibility workers | Trust + scale |
+| **v3** | Multi-leg + partner menus | Network effects |
+
 ### 1.2 Functional requirements (FR) — after alignment, say this as "what we must build"
 
 <a id="say-fr-human"></a>
+
+#### Human interaction (FR — after alignment)
+
+**Habit:** *“Say the **three nouns**: **TravelContext**, **StopFeasibility**, **Order window**.”*
 
 | FR area | Say it like this |
 |---------|-------------------|
@@ -49,6 +81,12 @@
 **Cross-ref:** Browse/rank/cache patterns in [11-hld-uber-eats-homepage.md](./11-hld-uber-eats-homepage.md); dispatch timing in [24-hld-food-delivery-order-dispatch.md](./24-hld-food-delivery-order-dispatch.md).
 
 ### 1.3 Non-functional requirements (NFR) — say as "how it must behave"
+
+<a id="say-nfr-human"></a>
+
+#### Human interaction (NFR — how it must behave)
+
+**Live:** *“**Fail-closed** on uncertainty; **rail API** down means **degraded** with **honest** UX—see [UX](#ux-awareness-train-pnr).”*
 
 | NFR | Say it like this |
 |-----|------------------|
@@ -100,6 +138,10 @@ Say it like this:
 
 <a id="say-voice-2"></a>
 
+#### Human interaction (estimate scale)
+
+**Live:** *“**PNR lookups** spike on holidays; **feasibility** is **CPU**-ish—**precompute** hot **train instances**.”*
+
 | Dimension | Illustrative |
 |-----------|----------------|
 | PNR lookups / day | Smaller than total **Eats DAU** but **spiky** around travel holidays |
@@ -110,6 +152,19 @@ Say it like this:
 ## 3. APIs and data model
 
 <a id="say-voice-3"></a>
+
+### 3.0 Core entities (who owns what — say before API tables)
+
+| Entity | Owns / lifecycle (one line) |
+|--------|-----------------------------|
+| **TravelContext** | **PNR/ticket** binding, **operator**, **ttl**, **status**. |
+| **ItinerarySnapshot** | **Versioned** stops/times—**source** for feasibility + order lock. |
+| **StopFeasibility** | **Which restaurants** can hit **which dwell window**—may be **precomputed**. |
+| **Order** | **Handoff station** + **service window** artifact—**immutable** post-commit semantics per [⚖️](#consistency-model-train-pnr). |
+
+#### Human interaction (API design — travel context + streaming delays)
+
+**Live:** *“**POST travel-context** creates the binding; **GET stops** is the **product-critical** read; **SSE** for delays keeps **home** fresh without **polling** rail to death.”*
 
 ### 3.1 APIs (sketch)
 
@@ -147,6 +202,12 @@ So:
 
 <a id="say-voice-4"></a>
 
+#### Human interaction (high-level architecture / HLD)
+
+**Habit:** *“**Rail truth** in → **Travel** → **Home** reads **geo** like [11](./11-hld-uber-eats-homepage.md) but **rank** uses **station ETA**.”*
+
+**Live:** *“Say [user journey](#user-journey-train-pnr) **once**, then this diagram: **TC** owns itinerary versions; **HOME** never silently widens a **committed** window.”*
+
 ```mermaid
 flowchart TB
   TC[Travel / PNR svc]
@@ -182,6 +243,12 @@ If **feasibility** becomes **uncertain** (delay, short dwell, kitchen slip), we 
 
 <a id="say-voice-5"></a>
 
+#### Human interaction (deep dive — critical flow, optimizations & evolution)
+
+**Habit:** *“Walk **delay event → version bump → feasibility → cache invalidation → user push**.”*
+
+**Live (evolution):** *“**v1**: poll delays + **manual** reselect. **v2**: **webhook-driven** recompute + **targeted** invalidation. **v3**: **predictive** dwell risk scoring—still **notify** on any **commit** risk.”*
+
 <a id="bottleneck-anchor-once"></a>
 ### 🎯 Bottleneck Anchor
 
@@ -206,6 +273,10 @@ sequenceDiagram
 
 ## 6. Scaling and bottlenecks
 
+#### Human interaction (scaling & bottlenecks)
+
+**Live:** *“**Rail rate limits** and **feasibility CPU** are the knobs—**cache** itinerary, **queue** heavy recompute, **shed** to shorter station list with **disclosure**.”*
+
 | Risk | Mitigation |
 |------|------------|
 | **Rail API rate limits** | **Cache** itinerary; **webhook** push |
@@ -224,12 +295,20 @@ To handle **feasibility** load without melting **CPU** or **rail** quotas:
 
 ## 7. Reliability and failure handling
 
+#### Human interaction (reliability & failure handling)
+
+**Live:** *“**Invalid PNR** is a **clean** error; **missed stop** is a **support** workflow with **credit** policy—no **ghost** order states.”*
+
 - **PNR invalid:** clear **error** + **fallback** to GPS home.  
 - **Missed stop:** **no-show** policy; **credit** workflow.
 
 ---
 
 ## 8. Tradeoffs and alternatives
+
+#### Human interaction (tradeoffs & alternatives)
+
+**Live:** *“**Verified PNR** costs integration but buys **trust**; **GPS assist** saves UX when rail is down but isn’t **train mode**.”*
 
 | Choice | Trade |
 |--------|--------|
@@ -240,6 +319,10 @@ To handle **feasibility** load without melting **CPU** or **rail** quotas:
 
 ## 9. Monitoring, observability, and security
 
+#### Human interaction (monitoring, observability & security)
+
+**Habit:** *“I’d alert on **feasibility false positives** and **delay→push latency**—those are **missed handoff** precursors.”*
+
 **Metrics:** PNR **verify success**, **feasibility false positive** rate (missed handoff), **delay** handling latency.  
 **Security:** **PNR** is sensitive—**encrypt at rest**, **minimal** echo in logs.
 
@@ -247,20 +330,33 @@ To handle **feasibility** load without melting **CPU** or **rail** quotas:
 
 ## 10. Design patterns, data structures & best practices
 
-| Pattern | Map |
-|---------|-----|
-| **Adapter** | Per rail operator |
-| **Event-driven** | Delay webhooks |
-| **Saga** | Re-anchor order |
+#### Human interaction (design patterns, data structures & best practices)
+
+**Verbatim (say on the board, ~30s):** *“**Adapter** per rail operator for **PNR verify** and **station master**; **event-driven** ingest for **delay webhooks**; **saga** or **process manager** for **re-anchor** when platforms change; **optimistic locking** on **order version**; **feasibility service** as **pure function** of **ETA + dwell**; **outbox** for **push** to rider when state changes.”*
+
+**Live:** *“**Adapter**, **event-driven**, **saga** re-anchor—three anchors, then I’ll add **outbox** if they ask **reliability**.”*
+
+| Pattern / DS | Where | One interview line |
+|----------------|------|----------------------|
+| **Adapter** | Operator integrations | “**IRCTC** vs **Deutsche Bahn** don’t leak into **core** order code.” |
+| **Event-driven / webhook** | Delays | “Treat operator callbacks as **at-least-once**; **dedupe** by event id.” |
+| **Saga / process manager** | Re-anchor | “**Compensate** or **re-plan** couriers when **platform** shifts.” |
+| **State machine** | Order + handoff | “Explicit **states**: confirmed → at-station → **handoff window**.” |
+| **Feasibility + version** | Core domain | “**False positive** feasibility is a **product** incident—I **version** decisions.” |
+| **Transactional outbox** | Notifications | “Rider push **after** DB commit—no **ghost** messages.” |
 
 <a id="say-voice-10"></a>
-**Live:** max **four** patterns.
+**Live:** pick **five or six** rows; own **feasibility** honesty.
 
 ---
 
 ## Closing notes (where wrap-up human interaction lives)
 
-Endgame is **short**, **confident**, and **conversational**: use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Communication (do vs avoid)](#communication-do-vs-avoid), and [60-second close](#60-second-close)—not a second full design pass.
+#### Human interaction (closing notes)
+
+**Live:** *“Train delivery is **feasibility + versions + honest degrade**—link back to [11](./11-hld-uber-eats-homepage.md) for read funnel, [24](./24-hld-food-delivery-order-dispatch.md) for dispatch timing.”*
+
+Endgame is **short**, **confident**, and **conversational**: use the **Human interaction** subsections under [Bar-raiser](#bar-raiser-follow-ups), [Communication (do vs avoid)](#communication-do-vs-avoid), and [60-second close](#60-second-close)—not a second full design pass.
 
 <a id="communication-do-vs-avoid"></a>
 
@@ -275,6 +371,8 @@ Endgame is **short**, **confident**, and **conversational**: use **`#### Human i
 
 ## Bar-raiser follow-ups
 
+#### Human interaction (bar-raiser follow-ups)
+
 | They ask | Say it like this |
 |----------|------------------|
 | **Fraud** | “**Velocity** limits on PNR changes; **device** binding.” |
@@ -284,6 +382,8 @@ Endgame is **short**, **confident**, and **conversational**: use **`#### Human i
 ---
 
 ## 60-second close
+
+#### Human interaction (60-second close)
 
 | Beat | Say it like this |
 |------|------------------|

@@ -2,11 +2,27 @@
 
 <a id="interview-spine-nine-steps"></a>
 
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+
+
+
 ## 1. Clarify requirements
 
 ### 1.0 Live flow
 
 <a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “Dispatch is **online optimization under SLO**—I’ll **cap K** and keep **Trip owns accept** explicit.”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
 
 **Opening (~once):** *“I’ll align **objective** (**ETA vs earnings**), **surge** as input, **fairness**, and **latency SLO**; I’ll **default** to **streaming greedy** matching and only add **batch** reassignment if **throughput/optimality** goals force it. Then **scale**, **geo structures**, **architecture**, **one match cycle**. **Pause after the diagram**—**scoring**, **rebalance**, or **load**?”*
 
@@ -26,6 +42,20 @@
 | **Surge** | “Is **surge** an **input feature** only, or does it change **search radius**?” |
 | **Pool** | “**Shared rides** change matching—**in scope**?” |
 | **Fairness** | “**Driver starvation**—do we need **rotation** or **throttle** repeat declines?” |
+
+**Micro-pauses:** *“So I’ll **default streaming greedy** under your **p99**, **cap K**, and keep **[Matcher proposes, Trip commits](#commit-boundary-anchor)**—got it.”*
+
+#### Human interaction (clarify requirements — think out loud & evolve scope)
+
+**Habit:** *“Matching is **online search under a deadline**—I buy scope on **objective**, **batch vs stream**, and **who commits** before I draw the geo index.”*
+
+**Live:** *“If you want **global batch** optimality, I’ll say out loud that we’re trading **wait time** and **complexity** for **throughput**—I only go there when you insist.”*
+
+| Stage | Default | Evolve when… |
+|-------|---------|----------------|
+| **v1** | **Streaming greedy** + **TTL offers** + **Trip commit** | p99 stable |
+| **v2** | Richer **score** + **ETA batching** (capped parallel) | Acceptance / ETA quality |
+| **v3** | **Periodic batch** reassignment + **simulation** | Ops pushes pooled rides |
 
 ### 1.2 Functional requirements (FR)
 
@@ -48,6 +78,12 @@
 ### 1.3 Non-functional requirements (NFR)
 
 <a id="say-nfr-human"></a>
+
+#### Human interaction (NFR — how it must behave under load)
+
+**Habit:** *“Separate **latency SLO** on the match cycle from **correctness** on **commit**.”*
+
+**Live:** *“I’m OK with **stale driver index** for **search**; I’m **not** OK with **stale commit**—that’s **[TTL + re-check](#driver-state-consistency)**.”*
 
 | NFR | Say it like this |
 |-----|------------------|
@@ -83,6 +119,12 @@
 
 <a id="say-voice-2"></a>
 
+#### Human interaction (estimate scale — round numbers, invite correction)
+
+**Habit:** *“I want **order of magnitude** on **drivers/cell**, **match eval/sec**, and **K**—so I can defend **partitioning** and **ETA budgets**.”*
+
+**Live:** *“If **K** doubles, my **routing RPC fan-out** roughly doubles—so **K** is a **product + infra** knob, not just ML.”*
+
 | Dimension | Illustrative |
 |-----------|----------------|
 | Active drivers / metro | **10k–100k+** |
@@ -96,6 +138,22 @@
 ## 3. APIs and data model
 
 <a id="say-voice-3"></a>
+
+### 3.0 Core entities (who owns what — say before API tables)
+
+| Entity | Owns / lifecycle (one line) |
+|--------|-----------------------------|
+| **Trip** | **Durable** marketplace record; **only** place that **commits** assignment ([anchor](#commit-boundary-anchor)). |
+| **Matcher worker** | **Stateless** cycle: dequeue job → **propose** → **TTL** offer. |
+| **Driver index shard** | **Eventually consistent** view of **online** drivers by **cell**; **TTL** eviction. |
+| **Offer** | **Ephemeral** proposal referencing **driver** + **conditions**; not truth until Trip accepts. |
+| **Routing snapshot** | **ETA** inputs for **score**—**short TTL**, **bounded** parallelism. |
+
+#### Human interaction (API design — surfaces, idempotency, errors)
+
+**Habit:** *“Internal APIs are still **APIs**: **idempotent** propose, **conditional** reserve, explicit **409** when Trip rejects.”*
+
+**Live:** *“I’d document **`ProposeDriver`/`ReserveDriver`** as **at-least-once** safe—matcher retries must not **double-book** thanks to Trip **version**.”*
 
 ### 3.1 APIs (sketch)
 
@@ -213,9 +271,11 @@ flowchart LR
 ## 5. Deep dive: one match cycle
 
 <a id="say-voice-5"></a>
-#### Human interaction (deep dive)
+#### Human interaction (deep dive — critical flow, optimizations & evolution)
 
 **Habit:** *“**One cycle** on the board—then anchor [🔒 commit](#commit-boundary-anchor).”*
+
+**Live (evolution):** *“**v1**: **cap K** + **simple score** + **single** propose path. **v2**: **batch ETA** calls where API allows, **fairness** rotation. **v3**: **batch reassignment** windows only if we accept **extra wait** for **pooled** optimality—otherwise stay **streaming**.”*
 
 If they challenge **batch vs streaming**, default: **streaming greedy** for **p99**; **batch** only for **documented** optimality wins—see [Key insight](#key-insight-say-early).
 
@@ -254,6 +314,10 @@ sequenceDiagram
 
 <a id="say-voice-6"></a>
 
+#### Human interaction (scaling & bottlenecks — tie to diagram)
+
+**Live:** *“**Hot cell** is the classic failure mode—**subdivide**, **replicate** read index, **shed** lower-priority products. **ETA storm** → **budget** parallel routing calls, **approximate** first.”*
+
 | Risk | Mitigation |
 |------|------------|
 | **Hot cell** | **Subdivide** cells; **load shed** lower-priority products |
@@ -264,6 +328,10 @@ sequenceDiagram
 
 ## 7. Reliability and failure handling
 
+#### Human interaction (reliability & failure handling — user-visible story)
+
+**Live:** *“**Matcher** can crash—jobs **requeue**; **Trip** stays source of truth. **Rider** sees **searching / expanding** per [UX](#ux-awareness), not silent wrong driver.”*
+
 - **Matcher crash:** job **requeued**; **idempotent** propose.  
 - **Stale driver list:** **heartbeat TTL** evicts drivers; **re-validate** on **reserve**—full story in [🚗 Driver State Consistency](#driver-state-consistency).  
 - **Trip already filled:** **Trip service** rejects reserve—matcher **acks** and stops.  
@@ -272,6 +340,10 @@ sequenceDiagram
 ---
 
 ## 8. Tradeoffs and alternatives
+
+#### Human interaction (tradeoffs & alternatives — pick defaults)
+
+**Live:** *“I’ll **name** the default (**streaming greedy**) and the **price** of the alternative (**batch**). If we blur both, we ship **neither** p99 nor optimum.”*
 
 | Choice | Trade |
 |--------|--------|
@@ -283,6 +355,12 @@ sequenceDiagram
 
 ## 9. Monitoring, observability, and security
 
+#### Human interaction (monitoring, observability & security)
+
+**Habit:** *“SLIs follow **rider pain**: time-to-first-offer, **ghost offers**, **ETA error**.”*
+
+**Live:** *“**Security**: matcher callbacks are **authenticated**; **no** raw rider home in **debug** logs unless needed—**redact** by default.”*
+
 **Metrics:** time-to-first-offer, **proposal→accept** rate, **ETA error**, per-cell **queue depth**.  
 **Security:** **Auth** on matcher callbacks; **no PII** in feature logs if avoidable.
 
@@ -290,20 +368,35 @@ sequenceDiagram
 
 ## 10. Design patterns, data structures & best practices
 
-| Pattern | Map |
-|---------|-----|
-| **Spatial index** | H3/S2/Geohash |
-| **Priority queue** | Trip urgency |
-| **Strangler** | Add **batch** reassignment behind flag without breaking **default** streaming path |
+#### Human interaction (design patterns, data structures & best practices)
+
+**Verbatim (say on the board, ~30s):** *“**H3 / S2 / geohash** spatial index for **nearby drivers**; **min-heap** or **priority queue** for **trip urgency** and **FIFO** fairness caps; **TTL offers** with **re-check** for **stale** drivers; **batch scoring** behind a **strangler** flag; **Trip service** still owns **accept**—matcher only **proposes**.”*
+
+**Live:** *“**Spatial index**, **priority queue**, **TTL offer**, **strangler** for batch—**≤5** on the board.”*
+
+| Pattern / DS | Where | One interview line |
+|----------------|------|----------------------|
+| **Spatial index (H3/S2)** | Candidate gen | “I only consider **drivers in cell + ring**, not the planet.” |
+| **Priority queue** | Trip queue | “**Urgency** and **wait time** drive who gets CPU next.” |
+| **TTL + versioned offer** | Matching | “Stale offer **expires**; driver **re-checked** before commit.” |
+| **Cap-K + scoring** | Rank | “**O(all drivers)** is a **non-starter**—cap then rank.” |
+| **Strangler fig / feature flag** | Evolution | “**Batch** reassignment **ships dark**, then **percent** rollout.” |
+| **State + idempotency** | Handoff to Trip | “**Idempotent** propose; **Trip** txn makes **accept** real.” |
 
 <a id="say-voice-10"></a>
-**Live:** at most **four** patterns tied to boxes.
+**Live:** pick **five or six** rows; **never** skip **Trip commit** boundary.
 
 ---
 
 ## Closing notes
 
 <a id="communication-do-vs-avoid"></a>
+
+#### Human interaction (closing notes — calm ownership)
+
+**Habit:** *“Close with **journey + commit boundary + default algorithm**—then stop.”*
+
+**Live:** *“**Matcher proposes, Trip commits**; **streaming greedy** first; **TTL** + **re-check** for **stale drivers**; **hot cell** + **ETA budget** as bottlenecks.”*
 
 | Do | Avoid |
 |----|--------|
@@ -316,6 +409,10 @@ sequenceDiagram
 
 ## Bar-raiser follow-ups
 
+#### Human interaction (bar-raiser follow-ups — invite depth)
+
+**Live:** *“Happy to double-click **bipartite matching**, **multi-leg**, or **split-brain**—which is most interesting?”*
+
 | They ask | Say it like this |
 |----------|------------------|
 | **Bipartite matching** | “**Min-cost flow** offline great; online needs **approximation** under **latency**.” |
@@ -326,6 +423,8 @@ sequenceDiagram
 ---
 
 ## 60-second close
+
+#### Human interaction (60-second close — then silence)
 
 | Beat | Say it like this |
 |------|------------------|

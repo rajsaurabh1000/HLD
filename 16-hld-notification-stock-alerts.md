@@ -2,11 +2,27 @@
 
 <a id="interview-spine-nine-steps"></a>
 
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+
+
+
 ## 1. Clarify requirements
 
 ### 1.0 Live flow (how to open and steer)
 
 <a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “Stock alerts are **ticks → state → dedupe chain → channel**—I’ll call **SMS $** and **quiet hours** early.”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
 
 **Opening (~once):** *“I’ll align on **edge vs level** alerts, **channels + cost**, **quiet hours**, **tick→notify SLO**; then **scale**, **APIs + state**, **architecture**, and **one tick** through **match → dedupe → outbox**. I’ll **pause after the diagram**—depth on **hot symbols**, **dedupe**, or **provider failure**?”*
 
@@ -29,6 +45,18 @@
 | **Rules in flight** | “If a user **edits** a rule mid-tick, is there a **version** story?” |
 
 **Micro-pauses:** *“So I’ll **partition** by symbol, **edge-detect**, then **outbox** with **dedupe** and **rate limits**—especially before SMS.”*
+
+#### Human interaction (clarify requirements — think out loud & evolve scope)
+
+**Habit:** *“Alerts are **correctness of firing** + **fan-out cost**—I clarify **tick granularity**, **delivery channel**, and **exactly-once illusion**.”*
+
+**Live:** *“Is **price** source **exchange** or **vendor**? **SMS** cost cap? **Quiet hours**? **Coalesce** bursts?”*
+
+| Stage | Assume | Evolve when… |
+|-------|--------|----------------|
+| **v1** | **Partition** by symbol + **simple** threshold | Few users |
+| **v2** | **Outbox** + **template** rendering + **rate limit** | Channel cost hurts |
+| **v3** | **Flink** windows + **priority** lanes + **global** abuse controls | Viral symbol |
 
 ### 1.2 Functional requirements (FR) — after alignment, say this as “what we must build”
 
@@ -159,7 +187,19 @@
 ## 3. APIs and data model
 
 <a id="say-voice-3"></a>
-#### Human interaction (APIs & data model)
+
+### 3.0 Core entities (who owns what — say before API tables)
+
+| Entity | Owns / lifecycle (one line) |
+|--------|-----------------------------|
+| **User** | Channels, **quiet hours**, **locale**, **consent**. |
+| **Symbol / instrument** | **Partition** key for **price** stream fan-in. |
+| **AlertRule** | Threshold, comparator, **cooldown**—**versioned**. |
+| **PriceTick** | **Append** stream; **dedupe** by `(symbol, ts_bucket)`. |
+| **NotificationJob** | **Idempotent** send unit; **retry** + **DLQ**. |
+| **Outbox row** | **At-least-once** handoff to **notifier** workers. |
+
+#### Human interaction (APIs & data model — API design + contracts)
 
 **Habit:** *“**Rules** in DB; **state** for FSM; **outbox** for delivery.”*
 
@@ -258,7 +298,9 @@ flowchart LR
 ## 5. Deep dive: tick to notify
 
 <a id="say-voice-5"></a>
-#### Human interaction (deep dive — critical flow)
+#### Human interaction (deep dive — critical flow, optimizations & evolution)
+
+**Live (evolution):** *“**Default**: **tick** → **compare** rule → **enqueue** notify job. **Evolve**: **windowed** aggregates to cut chatter, **cohort sampling** for load test, **priority queue** when **SMS** provider throttles.”*
 
 **Habit:** *“Walk **one tick** through **partition → state → dedupe → outbox**.”*
 
@@ -457,6 +499,8 @@ Name **partitioned stream**, **FSM**, **outbox**, **breaker** on the diagram.
 #### Human interaction (design patterns, data structures & best practices)
 
 **Habit:** *“**Edge-triggered FSM**, **dedupe**, **outbox**, **adapter** per channel.”*
+
+**Verbatim (drive the room in ~40s):** *“**Partitioned stream** of ticks or price updates; **edge-triggered FSM** per rule so we don’t spam every tick; **inverted map** symbol→rule_ids sharded; **dedupe + rate limit + quiet hours** as a **chain** before channel adapters; **outbox** after rule persist; **Adapter** for FCM/APNs/SMS with **circuit breaker**; optional **Bloom** prefilter on hot symbols.”*
 
 **Live:** **at most four** patterns on the pipeline; then stop.
 

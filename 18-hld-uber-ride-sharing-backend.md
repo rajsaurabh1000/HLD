@@ -2,11 +2,27 @@
 
 <a id="interview-spine-nine-steps"></a>
 
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+
+
+
 ## 1. Clarify requirements
 
 ### 1.0 Live flow (how to open and steer)
 
 <a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “Ride core is **trip state machine**; matching **proposes**—I’ll pin **who commits accept** before APIs.”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
 
 **Opening (~once):** *“I’ll align on **trip lifecycle**, **matching boundary** (in vs out of scope), **payments/fraud**, and **consistency** for *request → offer → accept*; then **scale**, **APIs**, **architecture**, and the **happy path + cancel**. I’ll **pause after the diagram**—depth on **state machine**, **matching handoff**, or **reliability**?”*
 
@@ -28,6 +44,18 @@
 | **Safety** | “**Share trip**, **emergency**—in scope for APIs or later?” |
 
 **Micro-pauses:** *“So **trip state** is source of truth; **matching** proposes **driver+ETA**; **accept** commits—got it.”*
+
+#### Human interaction (clarify requirements — think out loud & evolve scope)
+
+**Habit:** *“I’m drawing boundaries: **Trip** vs **Matching** vs **Payments**—wrong boundary causes double-book or money bugs.”*
+
+**Live:** *“Are we **multi-region** for **writes** on day one? Is **Pool** a different **aggregate**? Does **cancel** always need **compensation** with payments?”*
+
+| Stage | Default | Evolve when… |
+|-------|---------|----------------|
+| **v1** | Single-region **state machine** + **async match** + **sync accept** | p99 OK |
+| **v2** | **Offer TTL**, **idempotent** APIs, **outbox** to payments | Money path hardens |
+| **v3** | **Orchestrated saga** for cancel/refund + **MR** reads | Compliance / scale |
 
 ### 1.2 Functional requirements (FR)
 
@@ -111,7 +139,18 @@
 ## 3. APIs and data model
 
 <a id="say-voice-3"></a>
-#### Human interaction (APIs & data model)
+
+### 3.0 Core entities (who owns what — say before API tables)
+
+| Entity | Owns / lifecycle (one line) |
+|--------|-----------------------------|
+| **Trip** | **State machine** + **version**; **durable** in OLTP; **single writer** partition. |
+| **Offer / Assignment** | **Proposal** with **TTL**; not committed until **accept** edge. |
+| **Driver session** | **Availability** hints for matching—**not** authoritative for money. |
+| **Payment intent** | **Payments** service owns **capture**; Trip stores **references** only. |
+| **TripEvent** | **Append-only** audit / replay stream. |
+
+#### Human interaction (APIs & data model — API design + contracts)
 
 **Habit:** *“Small **command** API; **events** out.”*
 
@@ -264,9 +303,11 @@ flowchart TB
 ## 5. Deep dive: request → match → accept
 
 <a id="say-voice-5"></a>
-#### Human interaction (deep dive)
+#### Human interaction (deep dive — critical flow, optimizations & evolution)
 
 **Habit:** *“Walk **`POST /trips`** then **accept** like a sequence diagram.”*
+
+**Live (evolution):** *“**v1**: **REQUESTED → MATCHING → OFFERED → MATCHED** with **optimistic version** on accept. **v2**: **outbox** to payments + **DLQ** discipline. **v3**: **saga** visibility for long cancel/refund—still **one Trip partition** as coordinator.”*
 
 If they drill on **matching internals**, use [🚗 Matching Deep Dive (if probed)](#matching-deep-dive-probed)—then return to **Trip commit** boundaries here.
 
@@ -335,6 +376,10 @@ sequenceDiagram
 
 <a id="say-voice-8"></a>
 
+#### Human interaction (tradeoffs & alternatives)
+
+**Live:** *“**Async match** wins **p99** on `POST /trips` but costs **product** complexity—**searching** UX must be honest. **Monolith** trip+match trades **velocity** vs **blast radius**.”*
+
 | Choice | Upside | Downside |
 |--------|--------|------------|
 | **Sync match** in `POST /trips` | Simple mental model | Bad **p99** at peak |
@@ -347,6 +392,12 @@ sequenceDiagram
 
 <a id="say-voice-9"></a>
 
+#### Human interaction (monitoring, observability & security)
+
+**Habit:** *“I’d alert on **accept conflicts** and **payment reconciliation lag**—those are **money + trust**.”*
+
+**Live:** *“**Security**: **AuthZ** on **every** transition; **trip_id** is never a public guessable sequence if we can help it; logs **redact** pickup addresses at high verbosity.”*
+
 **SLIs:** time-to-first-offer, accept **conflict** rate, cancel rate by state, payment **reconciliation** lag.  
 **Security:** **AuthZ** on every trip transition; **no IDOR** on `trip_id`; **PII** minimization in logs.
 
@@ -354,17 +405,21 @@ sequenceDiagram
 
 ## 10. Design patterns, data structures & best practices
 
-| Pattern | Where |
-|---------|--------|
-| **Orchestrated saga + outbox** | Trip + payment (default over pure choreography) |
-| **State machine** | Trip lifecycle |
-| **Partition** | By region / trip_id |
-| **Queue** | Match workers |
-
 <a id="say-voice-10"></a>
-#### Human interaction (patterns)
+#### Human interaction (design patterns, data structures & best practices)
 
-**Live:** name **at most four** patterns on the diagram; stop.
+**Verbatim (say on the board, ~30s):** *“**Trip state machine** owns valid transitions; **orchestrated saga** with **transactional outbox** for payments and side effects; **partition** by region or **trip_id** for locality; **async queue** for matching workers; **optimistic locking** on accept with **version**; **idempotency keys** on client retries.”*
+
+**Live:** name **at most five** patterns on the diagram, then stop.
+
+| Pattern / DS | Where | One interview line |
+|----------------|------|----------------------|
+| **Orchestrated saga + outbox** | Trip + payment | “Cross-service money uses **outbox**, not **hopeful** RPC.” |
+| **State machine** | Trip aggregate | “Only **valid** edges—no illegal **cancel from delivered**.” |
+| **Partition by region / trip** | Services + DB | “**Locality** for matching and **blast radius**.” |
+| **Work queue + workers** | Matching | “Matcher **proposes**; Trip **commits**—queue decouples load.” |
+| **Optimistic concurrency** | Accept / trip | “**409** on stale version beats **lost updates**.” |
+| **Idempotency key** | Client POST | “Double-tap **request** doesn’t spawn two trips.” |
 
 ---
 
@@ -386,6 +441,10 @@ sequenceDiagram
 
 <a id="say-voice-bar"></a>
 
+#### Human interaction (bar-raiser follow-ups)
+
+**Live:** *“Pick one: **Pool**, **cross-region**, or **payment failure**—I’ll go deep where you steer.”*
+
 | They ask | Say it like this |
 |----------|------------------|
 | **Pool** | “Shared **pickup order** + **per-leg** fare allocation—still **one** trip aggregate or **parent/child** trips.” |
@@ -397,6 +456,8 @@ sequenceDiagram
 ## 60-second close
 
 <a id="say-voice-close"></a>
+
+#### Human interaction (60-second close)
 
 | Beat | Say it like this in the room |
 |------|------------------------------|

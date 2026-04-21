@@ -2,11 +2,27 @@
 
 <a id="interview-spine-nine-steps"></a>
 
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+
+
+
 ## 1. Clarify requirements
 
 ### 1.0 Live flow (how to open and steer)
 
 <a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “Browse is **two paths**: fast **read** (catalog/PDP) and noisy **signals** (Kafka)—I won’t collapse them into one box.”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
 
 **Opening (~once):** *“I’ll align on **browse vs signals**, **guest vs auth**, **staleness for trending**, rough **PDP/PLP p99**; then **scale**, **APIs + stores**, **architecture** (read pipe + event pipe), and **GET PDP** / **POST events**. I’ll **pause after the diagram**—does that work, and where do you want depth: **catalog**, **search**, or **Kafka path**?”*
 
@@ -29,6 +45,18 @@
 | **Semantics** | “If we say **bestseller**, does that **have** to mean **purchase counts** only?” |
 
 **Micro-pauses:** *“So I’ll never block **PDP** on Kafka; purchase-backed labels trace to **order facts**.”*
+
+#### Human interaction (clarify requirements — think out loud & evolve scope)
+
+**Habit:** *“I’m clarifying **read vs write ownership**, **truth for badges** (‘bestseller’), and **staleness**—because those decide whether Kafka touches the hot path.”*
+
+**Live:** *“Before PLP/PDP boxes: is **search** in scope or a **link-out**? Are **reviews** on critical PDP path? Is **inventory** **hard** or **soft** on browse?”*
+
+| Stage | Assume | Evolve when… |
+|-------|--------|----------------|
+| **v1** | **Catalog read models** + **cache**; **events** only for **async** enrichment | Traffic proves **read** pressure |
+| **v2** | **Stream** aggregates to **feature store** for badges | Merch wants **near-real-time** campaigns |
+| **v3** | **Multi-region** reads + **stricter** PDP **SLO** + **dark** experiments | Compliance / tail latency |
 
 ### 1.2 Functional requirements (FR) — after alignment, say this as “what we must build”
 
@@ -187,6 +215,17 @@
 | **Metrics** | “**Bestseller** is defined from **order facts** in the warehouse; Redis **mirrors** with known lag.” |
 | **Core split (once)** | Same as [Key insight / invariant](#key-insight-say-early)—**read path** vs **signal path**; **honest** labels. |
 
+### 3.0 Core entities (who owns what — say before API tables)
+
+| Entity | Owns / lifecycle (one line) |
+|--------|-----------------------------|
+| **Product** | **SKU** identity, PDP **read model**, **soft** inventory on browse vs **hard** at checkout (align with interviewer). |
+| **Category** | Tree / **navigation**; **cacheable**. |
+| **Seller** | **Merchant** profile; **trust** signals on PLP. |
+| **ProductMedia** | **CDN** URLs; **immutable** refs on PDP doc. |
+| **BehaviorEvent** | **Append-only** beacon; **never** blocks PDP. |
+| **AggregateScore** (materialized) | **Bestseller** / trending—**derived** from **order facts** + window. |
+
 ### 3.1 Public APIs (sketch)
 
 | API | Purpose |
@@ -199,11 +238,7 @@
 
 **Headers:** `Authorization`, **`Idempotency-Key`** on sensitive writes if any; **`If-None-Match`** on PDP.
 
-### 3.2 Core entities
-
-**Product**, **Category**, **Seller**, **ProductMedia**, **Event** (immutable), optional **AggregateScore** (materialized).
-
-### 3.3 Storage by access pattern
+### 3.2 Storage by access pattern
 
 | Data | Store | Rationale |
 |------|-------|-----------|
@@ -213,7 +248,7 @@
 | Keyword search | OpenSearch | Inverted index |
 | Purchases / orders (canonical) | OLTP SQL | ACID when checkout exists |
 
-### 3.4 MongoDB document example (interviewer favorite)
+### 3.3 MongoDB document example (interviewer favorite)
 
 **Read model** per product—not the purchase ledger:
 
@@ -315,7 +350,9 @@ flowchart TB
 ## 5. Deep dive: critical flow
 
 <a id="say-voice-5"></a>
-#### Human interaction (deep dive — critical flow)
+#### Human interaction (deep dive — critical flow, optimizations & evolution)
+
+**Live (evolution):** *“**Default**: PDP = **read model + cache**; **never** block on **Kafka**. **Evolve**: **partial hydration** (above-fold first), **edge cache** for static fragments, **BFF fan-out budget**—if tail blows, **precompute** hot PDP **slices**.”*
 
 **Habit:** *“Pick **one** path like a debugger—usually **GET PDP** then **POST events**.”*
 
@@ -544,6 +581,8 @@ Uber **HLD** rewards tying **patterns** to **boxes** on the board—not a laundr
 #### Human interaction (design patterns, data structures & best practices)
 
 **Habit:** *“One pattern per hop—**event log**, **CQRS-lite**, **cache-aside**, **idempotent consumer**.”*
+
+**Verbatim (drive the room in ~40s):** *“**Kafka** is the append-only **event log** with **idempotent consumers** and **DLQ**; **CQRS-lite** separates fat **catalog read model** from **order** writes; **cache-aside** on PDP with **ETags**; **Redis ZSET** for trending top-K and **HyperLogLog** for UV if needed; **OpenSearch inverted index** for PLP; **circuit breaker** on Flink→Redis and search sinks; **outbox** if we publish cross-service after commit.”*
 
 **Live:** name **at most four** patterns on the diagram; *“Does that match how you’d split ownership?”* then stop.
 

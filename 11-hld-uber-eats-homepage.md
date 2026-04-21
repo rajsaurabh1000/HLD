@@ -2,11 +2,27 @@
 
 <a id="interview-spine-nine-steps"></a>
 
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+
+
+
 ## 1. Clarify requirements
 
 ### 1.0 Live flow (how to open and steer)
 
 <a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “Homepage is **eligibility + rank + assembly** under a **p99** budget—I’ll separate **trust** (geo/hours) from **taste** (rank).”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
 
 **Opening (~once):** *“I’ll align on **homepage scope**, **location + trust**, rough **p99**; then **scale**, **APIs + ownership**, **architecture**, and **`GET /home`** end-to-end. I’ll **pause after the diagram**—does that sequencing work, and where do you want depth: **geo**, **rank**, or **cache**?”*
 
@@ -29,6 +45,22 @@
 | **Experiments** | “Do we need to reserve space for **A/B or experiments** on ranking—like a **mixer** slot—or is ranking **static** for now?” |
 
 **Micro-pauses:** after one or two questions, **reflect back**: *“So if staleness is fine on browse, I can be more aggressive on cache—got it.”*
+
+#### Human interaction (clarify requirements — think out loud & evolve scope)
+
+**Habit:** *“Clarify isn’t politeness—it’s **risk control**. I’m buying the right to simplify later.”*
+
+**Live (open):** *“Before I draw boxes, I want to **pressure-test** three things: **what’s in the homepage shell**, **how hard eligibility is vs rank**, and **what p99 has to feel like**—because those three decide cache, mixer, and whether personalization is on the hot path.”*
+
+**Think-out-loud evolution (say if they let you steer):**
+
+| Stage | What you assume | What you’d add next if scope grows |
+|-------|-----------------|-------------------------------------|
+| **v1 — narrow** | Single metro, **generic + geo** rank, **no** sponsored mixer | Still **strict** in-zone; **ETag** + CDN for images |
+| **v2 — product** | **Reorder** rail, **cuisine chips**, **promos** via mixer | **Feature flags** per section; **partial section** degrade |
+| **v3 — scale / org** | **Multi-region** reads, **dense-city** sub-cells, **experiments** on rank | **Shadow** rank traffic; **stricter** observability on **mixer** vs **eligibility** |
+
+**Bar-raiser line:** *“If you force **everything** live and personalized on v1, I’ll say **honestly** that **p99** or **cost** will suffer—I’d rather **phase** it than fake a diagram.”*
 
 ### 1.2 Functional requirements (FR) — after alignment, say this as “what we must build”
 
@@ -329,9 +361,11 @@ flowchart LR
 ## 5. Deep dive: critical flow
 
 <a id="say-voice-5"></a>
-#### Human interaction (deep dive — critical flow)
+#### Human interaction (deep dive — critical flow, optimizations & evolution)
 
-**Habit:** *“I’ll trace **one** `GET /home` like a debugger—same order as the sequence diagram.”*
+**Habit:** *“I’ll **time-box**: default **`GET /home`** path first like a debugger—**then** what I’d optimize if metrics scream.”*
+
+**Live (evolution / think out loud):** *“**Default** path: **cap geo** → **hydrate batch** → **two-stage rank with deadline** → **assemble**. **First optimization** is almost always **candidate cap** + **single-flight** on hot cells—not a cleverer model. **Evolve** when: **rank p99** tail (**tighter deadline + more precompute**), **dense city** (**sub-cells**), **experiments** (**mixer isolation**).”*
 
 | Step | Say it like this in the room |
 |------|-------------------------------|
@@ -631,6 +665,8 @@ Uber **HLD** rewards **distributed-systems** thinking; classic **GoF** still app
 #### Human interaction (design patterns, data structures & best practices)
 
 **Habit:** *“Pattern names are shorthand for behavior—**one** name per beat, tied to **where** on the board.”*
+
+**Verbatim (drive the room in ~45s):** *“**Gateway** for auth and rate limits; **BFF** shapes the homepage payload; **locate → geo → filter → rank → assemble** is a **template method** with **strategy** rankers; **cache-aside** Redis and CDN for rails; **circuit breaker** and **bulkhead** so a sick ranker doesn’t take down reads; **CQRS-lite** so orders stay OLTP but the home feed reads **denormalized** docs; **Kafka** for signals off the hot path; **spatial index** H3 or geohash for nearby; **bounded heap** before expensive rank.”*
 
 **Live:** pick **at most four** patterns on the diagram; *“Does that naming match how you’d split ownership?”* then stop.
 

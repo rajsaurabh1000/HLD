@@ -2,11 +2,27 @@
 
 <a id="interview-spine-nine-steps"></a>
 
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+
+
+
 ## 1. Clarify requirements
 
 ### 1.0 Live flow (how to open and steer)
 
 <a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “Restaurant search is **text recall then hard geo**—I’ll say **honest null** beats far viral hits.”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
 
 **Opening (~once):** *“I’ll separate **keyword + facets** from **geo filter**; align on **open now**, **sort** (distance vs relevance), and **pagination**; then **index**, **query path**, **architecture**. **Pause after the diagram**—**inverted index**, **geo**, or **ranking**?”*
 
@@ -28,9 +44,23 @@
 
 **Micro-pauses:** *“So **retrieval** is **inverted index**, **filtering** is **geo + facets**, **rank** is **relevance** (+ optional **rescore**)—got it.”*
 
+#### Human interaction (clarify requirements — think out loud & evolve scope)
+
+**Habit:** *“Search is **index + query DSL + ranking**—I align **synonyms**, **geo model**, and **sponsored** before shards.”*
+
+| Stage | Default | Evolve when… |
+|-------|---------|----------------|
+| **v1** | Single shard BM25 + geo filter | MVP |
+| **v2** | Facets + **LTR** rescore + **CDC** | Quality |
+| **v3** | Per-market federation | Global scale |
+
 ### 1.2 Functional requirements (FR) — after alignment, say this as "what we must build"
 
 <a id="say-fr-human"></a>
+
+#### Human interaction (FR — after alignment)
+
+**Habit:** *“**Query + filters + pagination**—snippets are **denormalized** for UI speed.”*
 
 | FR area | Say it like this |
 |---------|-------------------|
@@ -40,6 +70,12 @@
 | **Pagination** | “**Keyset** by `(score, id)` or `(distance, id)`.” |
 
 ### 1.3 Non-functional requirements (NFR) — say as "how it must behave"
+
+<a id="say-nfr-human"></a>
+
+#### Human interaction (NFR — how it must behave)
+
+**Live:** *“**p99** beats perfect recall in browse—**cap fuzziness**.”*
 
 | NFR | Say it like this |
 |-----|------------------|
@@ -90,6 +126,10 @@ Say it like this:
 
 <a id="say-voice-2"></a>
 
+#### Human interaction (estimate scale)
+
+**Live:** *“**Millions** of docs, **meal-peak QPS**—**replicas** and **routing** shards are the levers.”*
+
 | Dimension | Illustrative |
 |-----------|----------------|
 | Documents | **Millions** restaurants + dishes optional |
@@ -100,6 +140,19 @@ Say it like this:
 ## 3. APIs and data model
 
 <a id="say-voice-3"></a>
+
+### 3.0 Core entities (who owns what — say before API tables)
+
+| Entity | Owns / lifecycle (one line) |
+|--------|-----------------------------|
+| **SearchDocument** | Denormalized **restaurant** view in index—**versioned** by **CDC**. |
+| **Query** | Parsed **DSL** + **filter context** (geo, open, facets). |
+| **Hit / Result row** | **Score**, **snippet** fields, **cursor** token. |
+| **IndexSegment** | **Immutable** Lucene segments; **merge** policy in builder. |
+
+#### Human interaction (API design — parameterized DSL + cursors)
+
+**Live:** *“**GET** is **parameterized** (no string concat DSL); **keyset** cursor avoids **deep offset** death.”*
 
 ### 3.1 APIs
 
@@ -143,6 +196,12 @@ So:
 
 <a id="say-voice-4"></a>
 
+#### Human interaction (high-level architecture / HLD)
+
+**Habit:** *“Say [journey](#user-journey-search-26) then **CDC → builder → OpenSearch → stateless API**.”*
+
+**Live:** *“**Index lag** is real—**query-time eligibility** is my **trust** backstop ([⚖️](#consistency-model-search-26)).”*
+
 ```mermaid
 flowchart LR
   CAT[Catalog change stream]
@@ -175,6 +234,12 @@ If search returns **irrelevant** or **far-away** hits, **trust** drops—so **ge
 
 <a id="say-voice-5"></a>
 
+#### Human interaction (deep dive — critical flow, optimizations & evolution)
+
+**Habit:** *“**Filter-first bool query** → hits → **optional LTR** under **deadline**.”*
+
+**Live (evolution):** *“**v1** BM25+geo. **v2** facets + LTR. **v3** federated markets—**query shape** stable.”*
+
 <a id="bottleneck-anchor-once"></a>
 ### 🎯 Bottleneck Anchor
 
@@ -198,6 +263,10 @@ sequenceDiagram
 
 ## 6. Scaling and bottlenecks
 
+#### Human interaction (scaling & bottlenecks)
+
+**Live:** *“**Hot queries** cache; **shard** by market; watch **post-filter geo** killing recall **and** latency.”*
+
 | Risk | Mitigation |
 |------|------------|
 | **Hot query** | **CDN** for **zero-query** nearby; **query cache** |
@@ -207,11 +276,19 @@ sequenceDiagram
 
 ## 7. Reliability and failure handling
 
+#### Human interaction (reliability & failure handling)
+
+**Live:** *“**Degrade** to **geo list** or **homepage** path with **honest** ‘results may be incomplete’—better than **wrong** far hits.”*
+
 - **Index lag:** **stale** ok if **labeled**; **hard** errors **fallback** to **geo-only** list from [11-hld-uber-eats-homepage.md](./11-hld-uber-eats-homepage.md) path.
 
 ---
 
 ## 8. Tradeoffs and alternatives
+
+#### Human interaction (tradeoffs & alternatives)
+
+**Live:** *“**OpenSearch/ES** is my **default** for this workload; separate **dish index** only when **recall** demands it.”*
 
 | Choice | Trade |
 |--------|--------|
@@ -222,6 +299,10 @@ sequenceDiagram
 
 ## 9. Monitoring, observability, and security
 
+#### Human interaction (monitoring, observability & security)
+
+**Habit:** *“**Null-result** spikes often mean **index** or **geo** regression—not ‘bad luck’.”*
+
 **Metrics:** **null results** rate, **p99**, **click position**, **index lag**.  
 **Security:** **Query injection** safe via **parameterized** DSL; **rate limit** abuse.
 
@@ -229,17 +310,31 @@ sequenceDiagram
 
 ## 10. Design patterns, data structures & best practices
 
-| Pattern | Map |
-|---------|-----|
-| **CDC** | Catalog → index |
-| **CQRS** | OLTP vs search doc |
+#### Human interaction (design patterns, data structures & best practices)
+
+**Verbatim (say on the board, ~30s):** *“**CDC** from catalog OLTP into a **unified search document**, **CQRS** so the index is a **read model** not the system of record, **inverted index** plus **geo filter** at query time, **keyset** pagination for deep pages, **bulkhead** between query and index build, and **circuit breaker** when OpenSearch is sick so I **degrade** to geo-only.”*
+
+**Live:** *“**CDC**, **CQRS**, **inverted index**, **keyset**—then I’ll add **bulkhead** if they push **p99**.”*
+
+| Pattern / DS | Where | One interview line |
+|----------------|------|----------------------|
+| **CDC (Debezium / binlog)** | Catalog → indexer | “Search follows OLTP; **lag** is bounded and **labeled**.” |
+| **CQRS / read model** | OpenSearch doc | “The document is **denormalized** for BM25 + facets.” |
+| **Inverted index + filters** | Query | “Text recall then **hard geo** + **eligibility**—Uber trust.” |
+| **BKD / geo_shape (optional)** | Spatial | “Don’t fake geo with text tricks when you have a **spatial** index.” |
+| **Keyset pagination** | API | “**Offset** dies at page 50; keyset is **stable** under churn.” |
+| **Bulkhead + circuit breaker** | Gateway → OS | “When search is down, **honest** partial results beat **wrong** far hits.” |
 
 <a id="say-voice-10"></a>
-**Live:** max **four** patterns.
+**Live:** pick **five or six** rows and **stop** at the diagram.
 
 ---
 
 ## Closing notes (where wrap-up human interaction lives)
+
+#### Human interaction (closing notes)
+
+**Live:** *“**Hard geo + query-time eligibility** beats clever text tricks for **Uber trust**.”*
 
 Endgame is **short**, **confident**, and **conversational**: drive the wrap from [Bar-raiser](#bar-raiser-follow-ups), [Communication (do vs avoid)](#communication-do-vs-avoid), and [60-second close](#60-second-close)—not a second full design pass.
 
@@ -256,6 +351,8 @@ Endgame is **short**, **confident**, and **conversational**: drive the wrap from
 
 ## Bar-raiser follow-ups
 
+#### Human interaction (bar-raiser follow-ups)
+
 | They ask | Say it like this |
 |----------|------------------|
 | **Typo-tolerance** | “**Edge n-grams** + **fuzziness** cap for **p99**.” |
@@ -265,6 +362,8 @@ Endgame is **short**, **confident**, and **conversational**: drive the wrap from
 ---
 
 ## 60-second close
+
+#### Human interaction (60-second close)
 
 | Beat | Say it like this |
 |------|------------------|

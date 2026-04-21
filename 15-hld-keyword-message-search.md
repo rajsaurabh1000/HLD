@@ -2,11 +2,27 @@
 
 <a id="interview-spine-nine-steps"></a>
 
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+
+
+
 ## 1. Clarify requirements
 
 ### 1.0 Live flow (how to open and steer)
 
 <a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “Search is **postings + merge** under a **scan budget**—I’m not giving a Lucene lecture unless you steer there.”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
 
 **Opening (~once):** *“I’ll align on **AND vs OR**, **phrase/proximity**, **index scope** (per user/chat/org), rough **search p99**; then **scale**, **data layout**, **architecture**, and **query path** end-to-end. I’ll **pause after the diagram**—depth on **intersection**, **sharding**, or **compaction**?”*
 
@@ -29,6 +45,18 @@
 | **SLO** | “Rough **p99** for search so I can cap **postings scanned**.” |
 
 **Micro-pauses:** *“So postings are **on-disk streamable** lists—never **RAM** materialize billions of ids.”*
+
+#### Human interaction (clarify requirements — think out loud & evolve scope)
+
+**Habit:** *“Search at Uber scale is **inverted index + distributed merge**—I pin **query syntax**, **ACL**, and **freshness** before I pick Lucene vs managed.”*
+
+**Live:** *“**Phrase vs keyword**? **Prefix**? **BM25** only or **learned** rerank? **Private chats**—who can see what?”*
+
+| Stage | Assume | Evolve when… |
+|-------|--------|----------------|
+| **v1** | **Per-shard** postings + **merge** + **ACL filter** | Latency OK |
+| **v2** | **Skip lists** / **WAND** for **AND** queries | CPU bound |
+| **v3** | **ColBERT**-style rerank **off path** | Quality bar rises |
 
 ### 1.2 Functional requirements (FR) — after alignment, say this as “what we must build”
 
@@ -151,7 +179,18 @@
 ## 3. APIs and data model
 
 <a id="say-voice-3"></a>
-#### Human interaction (APIs & data model)
+
+### 3.0 Core entities (who owns what — say before API tables)
+
+| Entity | Owns / lifecycle (one line) |
+|--------|-----------------------------|
+| **Document** | Message (or chunk) **text**, `doc_id`, **ACL** bitset / allowlist. |
+| **Term → postings** | **Inverted** lists on shard; **immutable** segments + **merge** policy. |
+| **Index segment** | **Versioned** build job output; **atomically** swapped at query node. |
+| **Query** | Stateless request with **cursor** / **session** for pagination. |
+| **Reranker model** (optional) | **Top-M** candidates only—**never** full corpus. |
+
+#### Human interaction (APIs & data model — API design + contracts)
 
 **Habit:** *“**Dictionary** in memory/mmap; **postings** on disk; **shard key** = tenant scope.”*
 
@@ -238,7 +277,9 @@ flowchart LR
 ## 5. Deep dive: critical flow
 
 <a id="say-voice-5"></a>
-#### Human interaction (deep dive — critical flow)
+#### Human interaction (deep dive — critical flow, optimizations & evolution)
+
+**Live (evolution):** *“**Default**: scatter **OR**-heavy query to shards → **merge** top-K with **ACL**. **Evolve**: **two-phase** (cheap recall + **rerank** service), **synonym** table versioned, **personal** index only if product pays cost.”*
 
 **Habit:** *“**Single term** = stream; **AND** = **rarest-first** + **`skipTo`**.”*
 
@@ -431,6 +472,8 @@ Tie **inverted index**, **sharding**, **CQRS-lite** to the diagram.
 #### Human interaction (design patterns, data structures & best practices)
 
 **Habit:** *“**Iterator** merge, **Strategy** for intersect order, **CQRS-lite** from message log.”*
+
+**Verbatim (drive the room in ~40s):** *“**Inverted index** on disk with **sorted postings** per term; **shard** by `user_id` or tenant for isolation; **CQRS-lite**—message store is truth, index is **projection**; **outbox** after commit to index jobs; **idempotent indexer** on `(message_id, version)`; query pipeline **Template method**: tokenize → fetch postings → **Iterator** merge AND/OR → rank snippet; **cap** `max_postings_scan`.”*
 
 **Live:** **at most four** patterns; tie each to **write** vs **read** path; then stop.
 
