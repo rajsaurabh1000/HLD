@@ -1,172 +1,35 @@
 # HLD — Keyword Index for Billions of Messages
 
-> **GitHub README style** — pair with [HLD-README.md](./HLD-README.md).
-
-| | |
-|--|--|
-| **Round** | 30–45 min (+ optional small coding) |
-| **Strong-hire hooks** | **Inverted index on disk**, **no RAM materialization** of huge posting sets, **rarest-first intersection** |
-
----
-
-## Table of contents
-
-**Prep**
-
-- [Interview plan](#interview-plan)
-- [SDE-2 drive kit (Senior interviewer)](#sde-2-drive-kit-senior-interviewer)
-- [Why the naive trie approach fails](#why-the-naive-trie-approach-fails)
-- [Strong-hire signals](#strong-hire-signals)
-- [Coverage map](#coverage-map)
-
-**Interview spine (nine steps)**
-
-- [Interview spine (nine steps)](#interview-spine-nine-steps)
-- [1. Clarify requirements](#1-clarify-requirements)
-- [2. Estimate scale](#2-estimate-scale)
-- [3. APIs and data model](#3-apis-and-data-model)
-- [4. High-level architecture](#4-high-level-architecture)
-- [5. Deep dive: critical flow](#5-deep-dive-critical-flow)
-- [6. Scaling and bottlenecks](#6-scaling-and-bottlenecks)
-- [7. Reliability and failure handling](#7-reliability-and-failure-handling)
-- [8. Tradeoffs and alternatives](#8-tradeoffs-and-alternatives)
-- [9. Monitoring, observability, and security](#9-monitoring-observability-and-security)
-- [10. Design patterns, data structures & best practices](#10-design-patterns-data-structures--best-practices)
-
-**Wrap-up**
-
-- [Bar-raiser follow-ups](#bar-raiser-follow-ups)
-- [Optional coding sketch](#optional-coding-sketch)
-- [Strong Hire room checklist](#strong-hire-room-checklist)
-- [60-second close](#60-second-close)
-
----
-
-## Interview plan
-
-> “Billions of messages with monotonic `msg_seq`. I’ll use a **disk-backed inverted index**: **sorted posting lists** per term with **compression**. Single keyword: **stream** postings with pagination; multi-keyword **AND**: **intersect** without loading all ids—**rarest term first** plus **galloping** / **skipTo**. I’ll cover **sharding** by inbox/chat for **privacy** and **Compaction** for writes. I can sketch **intersect** pseudocode if you want.”
-
----
-
-## SDE-2 drive kit (Senior interviewer)
-
-### A. Lock the agenda
-
-Clarify → scale → APIs/index layout → architecture → **query paths** (single + multi AND) → scaling/compaction → reliability → tradeoffs → monitoring/security. **Pause:** “Do you want **coding** on intersect or **design** only?”
-
-### B. Questions — **this order**
-
-| # | Ask |
-|---|-----|
-| 1 | “Default multi-keyword is **AND** or **OR**?” |
-| 2 | “Need **phrase** / proximity search?” |
-| 3 | “Index **per user**, **per chat**, or **global** public?” |
-| 4 | “Messages **immutable** or edits/tombstones?” |
-| 5 | “**Top-K** only or full iterator?” |
-| 6 | “Latency **p99** target for search?” |
-
-**Mirror:** “So postings must be **on-disk streamable**, not giant in-memory sets.”
-
-### C. Winning line per spine
-
-| Step | Sentence |
-|------|----------|
-| 1 | “**Inverted index**: term → **sorted** posting lists by `msg_seq`.” |
-| 2 | “Billions ⇒ **shard** + **compression** + **segments**.” |
-| 3 | “API returns **pages** with `after_seq`; index stores **deltas**.” |
-| 4 | “Writer tokenizes → append postings; reader **iterators** merge/intersect.” |
-| 5 | “Single term: **stream** list; AND: **rarest-first** + `skipTo`—no full materialize.” |
-| 6 | “Compaction, **tiered** storage, **hot shard** risk.” |
-| 7 | “Checksum segments; **tombstone** on delete; partial query policy.” |
-| 8 | “Managed ES vs custom—trade **velocity vs control**.” |
-| 9 | “**AuthZ** on shard; **redact** logs; postings scanned metric.” |
-
-### D. Whiteboard order
-
-1. **Dictionary + postings file** sketch.  
-2. **Single-keyword** read arrow.  
-3. **Multi-keyword** with **short list outer loop**.  
-4. Sharding box “**tenant scope**”.
-
-### E. Senior probes
-
-| Probe | Answer |
-|-------|--------|
-| “Trie on messages?” | “Trie doesn’t remove **postings**; can’t RAM **billions of ids**—use **disk postings** + **intersect**.” |
-| “RAM map keyword → all ids?” | “Same failure—**stream** intersection.” |
-| “Updates?” | “**Tombstone** + append new postings; **merge** segments async.” |
-
-### F. Time crunched
-
-**Inverted index + rarest-first AND** + **one** complexity sentence on compression.
-
-### G. Anti-patterns
-
-- O(all messages) scan per query at “billions” scale.  
-- Ignoring **shard for privacy**.  
-- No **pagination** contract.
-
----
-
-## Why the naive trie approach fails
-
-Building `Map<Keyword, Set<msg_id>>` by scanning every message against a trie of keywords might work for **offline batch**, but at **query** time you **cannot** materialize **billions of ids** per term in RAM. A **keyword trie** helps **prefix completion**, not replacing **compressed on-disk postings**.
-
-**Pivot:** **streaming intersection** + **segmented postings**.
-
----
-
-## Strong-hire signals
-
-- **Inverted index** + **delta compression** + **segments**.  
-- **Rarest-first AND** with **skipTo**.  
-- **Shard** by tenant for privacy and parallelism.
-
----
-
-## Coverage map
-
-- [ ] [Nine-step spine](#interview-spine-nine-steps)  
-- [ ] Tokenization / normalization  
-- [ ] Postings **sorted** by `msg_seq`  
-- [ ] Single-keyword + pagination  
-- [ ] Multi-keyword **AND** cost  
-- [ ] Sharding / privacy  
-- [ ] Updates / tombstones  
-
----
-
-## Interview spine (nine steps)
-
-| Step | What you deliver | Section |
-|------|------------------|---------|
-| **1** | Clarify requirements | [§1](#1-clarify-requirements) |
-| **2** | Estimate scale | [§2](#2-estimate-scale) |
-| **3** | APIs / data model | [§3](#3-apis-and-data-model) |
-| **4** | High-level architecture | [§4](#4-high-level-architecture) |
-| **5** | Deep dive critical flow | [§5](#5-deep-dive-critical-flow) |
-| **6** | Scaling / bottlenecks | [§6](#6-scaling-and-bottlenecks) |
-| **7** | Reliability / failure handling | [§7](#7-reliability-and-failure-handling) |
-| **8** | Tradeoffs / alternatives | [§8](#8-tradeoffs-and-alternatives) |
-| **9** | Monitoring / security | [§9](#9-monitoring-observability-and-security) |
-
----
+<a id="interview-spine-nine-steps"></a>
 
 ## 1. Clarify requirements
 
-### 1.1 Questions to ask first
+<a id="say-1-questions-human"></a>
+### 1.1 Clarify 
 
-| Question | Why it matters |
-|----------|----------------|
-| **AND** vs **OR** for multi-keyword default? | Intersect vs union |
-| **Phrase** search (“exact phrase”)? | Positional index |
-| Messages **immutable** or editable? | Tombstones, reindex |
-| Index scope: **per user**, **per chat**, **global** public? | Sharding + privacy |
-| **Language** / tokenization rules? | Analyzer choice |
-| **Top-K** only vs full result iterator? | WAND / early termination |
-| **p99** latency target for search? | Caching, max postings scanned |
+| Topic | Say it like this in the room |
+|--------------------------|-------------------------------|
+| **Boolean default** | “Multi-keyword default is **AND** or **OR**?” |
+| **Phrase** | “Do you need **phrase** / proximity—or token **AND** is enough?” |
+| **Scope** | “Index **per user**, **per chat**, or **global** public—drives **shard + authz**.” |
+| **Mutability** | “Messages **immutable** or **edits**—I’ll use **tombstones** + reindex if edits exist.” |
+| **Result shape** | “**Top-K** only vs full iterator—changes early-termination.” |
+| **SLO** | “Rough **p99** for search so I can cap **postings scanned**.” |
 
-### 1.2 Functional requirements (FR)
+**Micro-pauses:** *“So postings are **on-disk streamable** lists—never **RAM** materialize billions of ids.”*
+
+### 1.2 Functional requirements (FR) — after alignment, say this as “what we must build”
+
+<a id="say-fr-human"></a>
+#### Human interaction (FR — how to explain after alignment)
+
+**Habit:** *“**Index build** + **query** + **authz scope**.”*
+
+| FR area | Say it like this in the room |
+|---------|-------------------------------|
+| **Build** | “Ingest by **`msg_seq`**; **tokenize**; append **sorted postings** per term on **disk**; **tombstone** deletes.” |
+| **Search** | “Single term: **stream** postings with **pagination**; multi-term **AND**: **intersect** without loading full lists.” |
+| **Access** | “Results always **scoped** to what the caller may see—**no cross-tenant** reads.” |
 
 **Index build**
 
@@ -182,7 +45,18 @@ Building `Map<Keyword, Set<msg_id>>` by scanning every message against a trie of
 
 - Results **scoped** to authorized chats/users—no cross-tenant leakage.
 
-### 1.3 Non-functional requirements (NFR)
+### 1.3 Non-functional requirements (NFR) — say as “how it must behave”
+
+<a id="say-nfr-human"></a>
+#### Human interaction (NFR — how to say “how it must behave”)
+
+**Habit:** *“**Disk + stream**; cap **work per query**.”*
+
+| NFR area | Say it like this in the room |
+|----------|-------------------------------|
+| **Scale** | “**Billions** of postings—**inverted index on disk**, **segments**, **compression**.” |
+| **Latency** | “**Rarest-first AND**, **skipTo**, **caps** on postings scanned.” |
+| **Privacy** | “**AuthZ** on shard route every time; **redact** queries in logs.” |
 
 **Scale**
 
@@ -204,13 +78,32 @@ Building `Map<Keyword, Set<msg_id>>` by scanning every message against a trie of
 
 - **AuthZ** on every query; **encrypt at rest** for regulated tenants; **audit** access.
 
-### 1.4 Invariant
+### 1.4 Invariants (one sentence you repeat under pressure)
 
 **Invariant:** “We never return a message the caller is **not authorized** to see; index partitions are **isolated** by tenant/chat policy.”
+
+<a id="say-voice-1"></a>
+
+**Purpose:** handoff → **dictionary + postings + iterators** sketch.
+
+| Beat | Say it like this |
+|------|------------------|
+| **Bridge** | “A **RAM** `Map<term, Set<id>>` or trie-of-messages doesn’t fix **query**—you still can’t materialize **billions of ids**.” |
+| **Pivot** | “**Streaming intersection** on **sorted compressed postings** plus **shard** for privacy.” |
 
 ---
 
 ## 2. Estimate scale
+
+<a id="say-voice-2"></a>
+#### Human interaction (estimate scale)
+
+**Habit:** *“Billions ⇒ **shard + segment + cap**.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Volume** | “**10⁹+** messages; posting lists stay **huge**—must **stream**.” |
+| **Hot term** | “Head terms need **top-K**, **time bounds**, or **WAND**—not full enumeration.” |
 
 | Dimension | Illustrative |
 |-----------|----------------|
@@ -219,9 +112,21 @@ Building `Map<Keyword, Set<msg_id>>` by scanning every message against a trie of
 | Hot terms | Millions of hits—need **top-K** or **time bounds** |
 | Index size | **Many TB** → sharding + **tiered** storage |
 
+**Tie it in one line:** “**Shard** for privacy and parallelism; **never** load a full hot posting list into RAM.”
+
 ---
 
 ## 3. APIs and data model
+
+<a id="say-voice-3"></a>
+#### Human interaction (APIs & data model)
+
+**Habit:** *“**Dictionary** in memory/mmap; **postings** on disk; **shard key** = tenant scope.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **API** | “**GET** search with `after_seq` **pagination**; multi-term **mode=and**.” |
+| **Layout** | “**Segments** are immutable; **merge** in the background like Lucene-style engines.” |
 
 ### 3.1 APIs (sketch)
 
@@ -245,6 +150,16 @@ Building `Map<Keyword, Set<msg_id>>` by scanning every message against a trie of
 
 ## 4. High-level architecture
 
+<a id="say-voice-4"></a>
+#### Human interaction (high-level architecture / HLD)
+
+**Habit:** *“**Write path** appends segments; **read path** opens **iterators**.”*
+
+| Moment | Say it like this in the room |
+|--------|------------------------------|
+| **Write** | “Tokenize → **posting writer** → **segment files** per shard.” |
+| **Read** | “Dictionary lookup → **iterators** → **merge/intersect**—bounded work.” |
+
 ```mermaid
 flowchart LR
   T[tokenize / analyze] --> W[posting writer]
@@ -260,6 +175,20 @@ flowchart LR
 ---
 
 ## 5. Deep dive: critical flow
+
+<a id="say-voice-5"></a>
+#### Human interaction (deep dive — critical flow)
+
+**Habit:** *“**Single term** = stream; **AND** = **rarest-first** + **`skipTo`**.”*
+
+| Step | Say it like this in the room |
+|------|-------------------------------|
+| **Single** | “Dictionary → **stream** sorted `msg_seq` with **`after_seq`** cursor.” |
+| **AND** | “Order terms by **df**; walk the **shortest** list; **`skipTo`** on the others—**galloping** inside blocks.” |
+| **Phrase** | “Need **positions**—verify adjacency after AND narrows candidates.” |
+| **Anti-trie** | “Trie helps **prefix completion**; it doesn’t replace **compressed postings** at billions scale.” |
+
+This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
 
 ### 5.1 Single keyword
 
@@ -285,6 +214,16 @@ flowchart LR
 
 ## 6. Scaling and bottlenecks
 
+<a id="say-voice-6"></a>
+#### Human interaction (scaling & bottlenecks)
+
+**Habit:** *“**Postings scanned** is your money metric.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Huge lists** | “**Rarest-first**, skip pointers, block **max scores**.” |
+| **Compaction** | “Dedicated **merger** pool; throttle writes if backlog grows.” |
+
 | Risk | Mitigation |
 |------|------------|
 | **Huge posting reads** | Rarest-first + skip pointers + block max scores |
@@ -298,6 +237,16 @@ flowchart LR
 
 ## 7. Reliability and failure handling
 
+<a id="say-voice-7"></a>
+#### Human interaction (reliability & failure handling)
+
+**Habit:** *“**Checksum segments**; **tombstones**; **rebuild** story.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Corruption** | “Detect bad blocks; **rebuild** shard from message log.” |
+| **Partial** | “Return **partial page** + flag vs hard fail—product call.” |
+
 - **Replica** index shards; **failover** read path.  
 - **Corrupt segment:** checksum; **rebuild** from source of truth messages.  
 - **Partial query failure:** return **partial page** with error flag vs fail—product choice.  
@@ -306,6 +255,16 @@ flowchart LR
 ---
 
 ## 8. Tradeoffs and alternatives
+
+<a id="say-voice-8"></a>
+#### Human interaction (tradeoffs & alternatives)
+
+**Habit:** *“Managed ES vs custom—**velocity vs control**.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **RAM map** | “Doesn’t scale—same failure mode as naive trie story.” |
+| **Managed** | “OpenSearch/ES ships faster; **cost** and less **low-level** control.” |
 
 | Option | Good | Bad |
 |--------|------|-----|
@@ -320,6 +279,16 @@ flowchart LR
 
 ## 9. Monitoring, observability, and security
 
+<a id="say-voice-9"></a>
+#### Human interaction (monitoring, observability & security)
+
+**Habit:** *“Watch **postings scanned** as much as **p99**.”*
+
+| Topic | Say it like this in the room |
+|-------|-------------------------------|
+| **Metrics** | “Query **p99**, **postings scanned**, **index lag**, merge **depth**.” |
+| **Security** | “**Tenant** on every route; **redacted** query logs.” |
+
 **Metrics:** query **p99**, **postings scanned** per query, **merge** queue depth, **index lag** behind message log.
 
 **Security:** enforce **tenant** on every shard route; **no** cross-shard fan-in without auth; log **redacted** queries.
@@ -329,6 +298,8 @@ flowchart LR
 ---
 
 ## 10. Design patterns, data structures & best practices
+
+Tie **inverted index**, **sharding**, **CQRS-lite** to the diagram.
 
 ### 10.1 Search / distributed patterns
 
@@ -372,19 +343,52 @@ flowchart LR
 | Managed search (ES/OpenSearch) | Speed to ship vs **cost** + less control |
 | Custom on-disk index | Control vs **engineering** burden |
 
+<a id="say-voice-10"></a>
+#### Human interaction (design patterns, data structures & best practices)
+
+**Habit:** *“**Iterator** merge, **Strategy** for intersect order, **CQRS-lite** from message log.”*
+
+| You mean… | Say it like this in the room |
+|-----------|-------------------------------|
+| **Patterns** | “**Inverted index** on disk; **shard** by tenant; **idempotent indexer**; **breaker** on heavy deps.” |
+| **DS** | “Sorted **postings**, **dictionary**, **skip lists** in blocks, optional **Roaring**.” |
+
+---
+
+## Closing notes (where wrap-up human interaction lives)
+
+Optional: [coding sketch](#optional-coding-sketch) if they ask for pseudocode.
+
 ---
 
 ## Bar-raiser follow-ups
 
-**Q: “Message edited?”**  
-A: “**Tombstone** old postings; append new; **merge** cleans; query filters deleted.”
+<a id="say-voice-bar"></a>
+#### Human interaction (bar-raiser)
 
-**Q: “Too many rare terms?”**  
-A: “**min df**, stopwords, cap index size per user.”
+**Habit:** two–four sentences, then **stop**.
+
+| They ask | Say it like this |
+|----------|------------------|
+| **Edits** | “**Tombstone** old postings; append new; **merge** compacts; queries filter deleted.” |
+| **Rare terms** | “**min df**, stopwords, caps per user—control **noise** and **size**.” |
 
 ---
 
-## Optional coding sketch
+## 60-second close
+
+<a id="say-voice-close"></a>
+#### Human interaction (60-second close)
+
+**Habit:** one **net-net** pass.
+
+| Beat | Say it like this in the room |
+|------|------------------------------|
+| **Recap** | “**Inverted index** on disk—**sorted compressed postings**; single term **stream** + **pagination**; multi-term **AND** via **rarest-first** + **`skipTo`**; **shard** for **privacy** and scale; **compaction**; monitor **postings scanned** and **p99**.” |
+
+---
+
+### Optional coding sketch
 
 ```text
 intersect(lists):
@@ -395,17 +399,3 @@ intersect(lists):
 ```
 
 ---
-
-## Strong Hire room checklist
-
-- [ ] Spine **1→9**  
-- [ ] **Inverted index** + compression + segments  
-- [ ] **Rarest-first** + **skipTo**  
-- [ ] **Shard** + **authz**  
-- [ ] **Trie mistake** addressed  
-
----
-
-## 60-second close
-
-“**Disk-backed inverted index**, **sorted compressed postings**, **single-term** streaming pagination, **multi-term AND** via **rarest-first intersection** and **skipTo**—never materialize **billions of ids** in RAM. **Shard** for scale and **privacy**; **compaction** for write throughput; **monitor** scanned postings and **p99**.”
