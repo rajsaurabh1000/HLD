@@ -30,6 +30,7 @@
 - [7. Reliability and failure handling](#7-reliability-and-failure-handling)
 - [8. Tradeoffs and alternatives](#8-tradeoffs-and-alternatives)
 - [9. Monitoring, observability, and security](#9-monitoring-observability-and-security)
+- [10. Design patterns, data structures & best practices](#10-design-patterns-data-structures--best-practices)
 
 **Wrap-up**
 
@@ -364,6 +365,52 @@ sequenceDiagram
 **Security:** enforce **private** posts; **block** checks server-side; **rate limits**; **signed media URLs**; audit **follow** abuse.
 
 **Privacy:** minimize PII in logs; regional data rules if required.
+
+---
+
+## 10. Design patterns, data structures & best practices
+
+### 10.1 Feed / distributed patterns
+
+| Pattern | Where | Why |
+|---------|--------|-----|
+| **Hybrid fan-out** | Normal push + celebrity pull | Write amplification control |
+| **CQRS / materialized view** | Timeline per user | Read-optimized |
+| **Event-driven** | PostCreated → fan-out workers | Async scale |
+| **Cache-aside** | Hot timeline in Redis | p99 read |
+| **Bulkhead** | Rank vs fetch pools | Ranking stalls do not starve IO |
+| **Timeout + fallback** | Ranker SLO | Degrade to recency-only |
+
+### 10.2 Classic patterns
+
+| Pattern | Map |
+|---------|-----|
+| **Strategy** | Ranker: engagement vs recency vs social proof |
+| **Template method** | `GET /feed`: fetch ids → hydrate → rank → mix ads |
+| **Decorator** | Mixer layer (inject promoted / live modules) |
+| **Iterator** | Merge **k** friend streams for pull model |
+
+### 10.3 Data structures
+
+| Need | Structure |
+|------|-----------|
+| Timeline | **Append-only** list / wide row `(user_id → post_ids)` |
+| Celebrity reads | **Min-heap** or priority queue merge recent from followed |
+| Seen state | **Bloom** (approx) or compact bitset per session |
+| Live updates | **Pub/sub** channel per user or connection registry |
+
+### 10.4 Best practices
+
+- **Keyset** pagination on `(score, post_id)` or `(time, id)`.  
+- **Backfill** jobs idempotent with cursor checkpoints.  
+- **Graph ACL** enforced server-side on hydrate.
+
+### 10.5 Trade-offs
+
+| Pick | Trade |
+|------|--------|
+| Push fan-out | Read cheap vs **write** cost + fan-out lag |
+| Pull at read | Write cheap vs **read** latency for heavy consumers |
 
 ---
 
