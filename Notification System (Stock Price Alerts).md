@@ -30,6 +30,7 @@
 - [7. Reliability and failure handling](#7-reliability-and-failure-handling)
 - [8. Tradeoffs and alternatives](#8-tradeoffs-and-alternatives)
 - [9. Monitoring, observability, and security](#9-monitoring-observability-and-security)
+- [10. Design patterns, data structures & best practices](#10-design-patterns-data-structures--best-practices)
 
 **Wrap-up**
 
@@ -334,6 +335,52 @@ sequenceDiagram
 **Alerts:** sustained **DLQ** growth, **gap** in tick sequence, **quota** exhaustion.
 
 **Security:** authenticate rule changes; **rate limit** API; **encrypt** PII at rest; **audit** who created high-volume rules (abuse).
+
+---
+
+## 10. Design patterns, data structures & best practices
+
+### 10.1 Event / delivery patterns
+
+| Pattern | Where | Why |
+|---------|--------|-----|
+| **Partitioned stream** | Ticks or price updates by symbol | Parallel matchers |
+| **Edge-triggered FSM** | Rule: armed → triggered → cooldown | Avoid spam on every tick |
+| **Dedupe + rate limit** | Per user + rule + channel | Cost + UX |
+| **Outbox** | After rule persist enqueue notify job | Reliable side effects |
+| **Saga / compensation** | Multi-channel send (push + email) | Partial failure handling |
+| **Circuit breaker** | SMS / push provider APIs | Fail fast when provider down |
+
+### 10.2 Classic patterns
+
+| Pattern | Map |
+|---------|-----|
+| **State machine** | Subscription lifecycle |
+| **Strategy** | **Edge** vs **level** crossing detection |
+| **Chain of responsibility** | Quiet hours → dedupe → throttle → channel adapter |
+| **Adapter** | Normalize FCM / APNs / Twilio behind one interface |
+
+### 10.3 Data structures
+
+| Need | Structure |
+|------|-----------|
+| Symbol → subscribers | **Inverted** map: symbol → list of rule_ids (sharded) |
+| Hot symbol fan-out | **Bloom** optional prefilter before heavy work |
+| Cooldown | **TTL** key per (user, rule) in Redis |
+| Scheduled quiet hours | **Time-range** index or TZ-aware queue |
+
+### 10.4 Best practices
+
+- **Idempotent** delivery keys per (tick_id, rule_id).  
+- **Version** rules; matcher uses snapshot or reconciles post-send.  
+- **Cost guardrails:** max alerts per user per hour.
+
+### 10.5 Trade-offs
+
+| Pick | Trade |
+|------|--------|
+| Evaluate every tick | Simple vs **CPU** at scale |
+| Coalesce ticks | Cheaper vs **precision** |
 
 ---
 
