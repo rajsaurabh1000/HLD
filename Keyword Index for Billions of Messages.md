@@ -31,6 +31,7 @@
 - [7. Reliability and failure handling](#7-reliability-and-failure-handling)
 - [8. Tradeoffs and alternatives](#8-tradeoffs-and-alternatives)
 - [9. Monitoring, observability, and security](#9-monitoring-observability-and-security)
+- [10. Design patterns, data structures & best practices](#10-design-patterns-data-structures--best-practices)
 
 **Wrap-up**
 
@@ -311,7 +312,7 @@ flowchart LR
 | In-memory map | Simple | **Does not scale** |
 | Disk inverted index | Scales | Ops complexity |
 | Central global index | One stack | **Privacy blast radius** |
-| Elasticsearch managed | Faster to ship | Cost, less custom) |
+| Elasticsearch managed | Faster to ship | Cost; less control |
 
 **Alternatives:** **Elasticsearch** for full stack vs custom postings; **ngram** for substring vs token index tradeoffs.
 
@@ -324,6 +325,52 @@ flowchart LR
 **Security:** enforce **tenant** on every shard route; **no** cross-shard fan-in without auth; log **redacted** queries.
 
 **Compliance:** retention on **search logs**; right-to-erasure → **tombstone** + async scrub.
+
+---
+
+## 10. Design patterns, data structures & best practices
+
+### 10.1 Search / distributed patterns
+
+| Pattern | Where | Why |
+|---------|--------|-----|
+| **Inverted index** | Term → postings on disk | Standard IR at scale |
+| **Sharding** | By `user_id` or hash range | Isolation + parallelism |
+| **CQRS-lite** | Message log vs index projector | Rebuild index from source of truth |
+| **Outbox** | After message commit emit index job | Consistent indexing |
+| **Idempotent indexer** | `(message_id, version)` | Safe retries |
+| **Circuit breaker** | Downstream object store / ES | Protect query path |
+
+### 10.2 Classic patterns
+
+| Pattern | Map |
+|---------|-----|
+| **Iterator** | Merge **sorted** posting streams (AND/OR) |
+| **Strategy** | **rarest-first** vs fixed order intersection |
+| **Template method** | Query pipeline: tokenize → fetch → merge → rank snippet |
+| **Anti-corruption** | Normalize encodings / language before tokenize |
+
+### 10.3 Data structures
+
+| Need | Structure |
+|------|-----------|
+| Posting list | **Sorted** `message_id` arrays or **skiplist** segments on disk |
+| Vocabulary | **Lexicon** (term → term_id) |
+| Hot terms | **Block max** / skip ahead in merge |
+| Phrase / proximity | **Positional** postings or **bigram** table |
+
+### 10.4 Best practices
+
+- **Never** load full posting list into RAM for hot terms.  
+- **Cap** `max_postings_scan` and return partial + cursor.  
+- **Tenant** isolation on every shard lookup.
+
+### 10.5 Trade-offs
+
+| Pick | Trade |
+|------|--------|
+| Managed search (ES/OpenSearch) | Speed to ship vs **cost** + less control |
+| Custom on-disk index | Control vs **engineering** burden |
 
 ---
 
