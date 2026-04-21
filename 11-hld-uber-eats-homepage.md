@@ -29,6 +29,20 @@ We prioritize:
 latency over freshness for homepage browse,
 but correctness for serviceability (trust)
 
+## 🔒 Commit Boundary
+
+“Homepage response is committed when:
+
+- eligibility filtering is complete (must be correct)
+- ranking is either completed OR deadline reached
+
+If ranking exceeds deadline:
+- fallback ordering is used
+
+So:
+- eligibility = strict guarantee
+- ranking = best-effort”
+
 ## Decision (strong opinion)
 
 I’d start with:
@@ -61,6 +75,17 @@ The main bottlenecks I expect:
 - ranking latency (p99 tail)
 
 That’s what I’d monitor first
+
+## 🚦 Backpressure Handling
+
+“If traffic spikes:
+
+- reduce candidate size (lower K)
+- skip personalization
+- fallback to cached results
+
+Goal:
+protect latency (p99) over ranking quality”
 
 ## UX awareness
 
@@ -405,6 +430,23 @@ flowchart LR
   GW --> Asm
   App -->|events| K --> OLAP --> Ord
 ```
+## 🧠 Decision (Architecture)
+
+“I’d structure this as:
+
+- thin gateway
+- dedicated homepage service (BFF style)
+- geo + ranking as internal components
+
+because:
+
+- keeps latency controlled
+- isolates complexity in one place
+- allows independent evolution of ranking
+
+If system grows:
+- split ranking into separate service
+- introduce feature store + ML pipeline”
 
 **Human narration:** “This is a **read funnel**: cheap **geo filter** widens to a capped set, then **expensive scoring** runs only on that set. Writes to orders stay on the **async** path feeding **aggregates**.”
 
@@ -444,6 +486,26 @@ I can go deeper into geo, ranking, or caching.”
 | **Production voice** | “**Stampede** when a hot **cell TTL** expires—**single-flight + jitter**; **rank p99** at lunch—**deadline + fallback**; **bad GPS**—**saved address** + **log source**.” |
 
 This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
+
+“Ranking is always time-boxed to protect p99 latency.”
+
+## 🧠 Decision (Geo + Ranking)
+
+“I’d start with:
+
+- H3/geohash for geo indexing
+- Redis for hot cells
+- two-stage ranking
+
+because:
+
+- fast lookup
+- bounded candidate set
+- controlled p99 latency
+
+If scale increases:
+- move more ranking offline
+- introduce ML-based scoring”
 
 **Taking a stance (geo + rank):** *“I’d default **cell + neighbors + cap** on something **Redis-friendly** for read **p99**; I’d **revisit PostGIS** if polygons/joins outgrow the cell model. For rank: **two-stage** + **partial precompute**, **time-box** online scoring—**more precompute** only if product proves we need fresher rails without blowing **p99**.”*
 
@@ -558,6 +620,15 @@ sequenceDiagram
 | **Retries** | “Retry only **idempotent** reads, **backoff + cap**—no **retry storms**.” |
 | **Interrupted** | “If you cut in—same design, just more ruthless on **caps** and **deadlines**.” |
 | **Incident tone** | “In prod I’ve seen **stampede** on viral tiles, **hot geocells** starving a shard, and **rank tail**—same mitigations: **jitter**, **sub-partition**, **breaker + fallback**.” |
+
+
+## 👤 UX Under Failure
+
+“If ranking fails:
+
+- user still sees valid restaurants
+- ordering is still possible
+- experience degrades gracefully instead of breaking”
 
 ### 7.1 Dependency behavior
 
