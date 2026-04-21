@@ -130,7 +130,8 @@
 2. “**Purchase truth** lives in **orders/warehouse**; Redis **mirrors** with known **lag**.”  
 3. “**PDP** is **cache-aside** + **ETag**; **hot SKU** is a **partition** story.”  
 4. “**Two pipes**: read (**BFF + catalog + search**) vs write (**beacon → log → aggregate**).”  
-5. “**Degrade** trending before you **fail** the whole browse response.”
+5. “**Degrade** trending before you **fail** the whole browse response.”  
+6. “**User journey**: **this** session gets a **fast** read path; **past** users’ signals update **trending** **async** for **future** sessions—[say it early](#user-journey-framing) near the architecture.”
 
 <a id="say-voice-1"></a>
 
@@ -181,8 +182,8 @@
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
 | **APIs** | “**GET** categories, PLP, PDP, trending; **POST /events** is **async** accept into the log.” |
-| **Stores** | “**Mongo** (or doc) for flexible catalog reads; **Redis** for rollups; **OpenSearch** for text; **orders** stay **OLTP** for truth.” |
-| **Mongo story** | “I can walk the **document**—shard by **product_id** vs **seller_id** is a real tradeoff.” |
+| **Stores** | “**I’d start with Mongo** (or another document store) for **flexible** catalog reads and PDP-shaped payloads; **Redis** for rollups; **OpenSearch** for text; **orders** stay **OLTP SQL** for truth when checkout exists.” |
+| **Mongo story** | “**I’d only move catalog to SQL** (or **heavier** relational modeling) if **joins / reporting** on the catalog **dominate** the workload—until then Mongo + cache-aside fits **this** browse path.” |
 | **Metrics** | “**Bestseller** is defined from **order facts** in the warehouse; Redis **mirrors** with known lag.” |
 | **Core split (once)** | Same as [Key insight / invariant](#key-insight-say-early)—**read path** vs **signal path**; **honest** labels. |
 
@@ -208,7 +209,7 @@
 |------|-------|-----------|
 | Raw events | Kafka + data lake | Replay, cheap |
 | Hot popularity | Redis (ZSET, HLL for UV) | Sub-ms reads |
-| Catalog read model | MongoDB or SQL+JSON | Flexible attributes per vertical |
+| Catalog read model | **MongoDB** first (SQL+JSON if team is SQL-first) | Flexible attributes per vertical; **SQL** when joins/reporting dominate |
 | Keyword search | OpenSearch | Inverted index |
 | Purchases / orders (canonical) | OLTP SQL | ACID when checkout exists |
 
@@ -234,6 +235,23 @@
 
 ---
 
+## 👤 User journey framing (say this early)
+
+<a id="user-journey-framing"></a>
+
+**Say it in the room:** *“I think of this from the **user** side first:*
+
+*User **opens** the app → **browses** PLP / PDP → **interacts** (view, add-to-cart, wishlist) → those actions **emit signals** → we **process** them **asynchronously** (Kafka → aggregates) → **later** sessions see **updated** trending / popularity—**honestly labeled** when data lags.*
+
+*So the system is really two things at once:*
+
+1. ***Fast read path** for the **current** user (PDP/PLP, cache, search).*  
+2. ***Async learning loop** from **past** users—**never** blocking (1) on (2).”*
+
+👉 Use this **right before or right after** you walk the [architecture diagram](#4-high-level-architecture)—it ties **product** to **two pipes** without repeating the whole doc.
+
+---
+
 ## 4. High-level architecture
 
 <a id="say-voice-4"></a>
@@ -244,6 +262,7 @@
 | Moment | Say it like this in the room |
 |--------|------------------------------|
 | **Read path** | “**Gateway → BFF → catalog + Redis + search**—that’s the user-facing **PDP/PLP**.” |
+| **User journey** | “Same story as [user journey framing](#user-journey-framing): **browse now**, **signals** update **later** for others—two loops.” |
 | **Signal path** | “**Beacon → Kafka → stream job → Redis + optional doc patch**—parallel to reads.” |
 | **Checkpoint** | “Pause here—does this **split** match how you’d **shard teams**?” |
 | **Steer** | “**Should I go deeper** on **catalog**, **search**, or **event aggregation** next—or **failure modes** on this diagram?” |
@@ -304,12 +323,19 @@ flowchart TB
 | **PDP** | “**Cache-aside** with **ETag**; on miss, one **document** fetch—no **N+1**.” |
 | **Events** | “Validate → **partition** → **dedupe** (`event_id`) → **aggregate** with weights **purchase > cart > view** → sink Redis / denorm.” |
 | **Idempotency** | “**At-least-once** Kafka ⇒ **idempotent** consumers and keys.” |
-| **Anchor** | “First thing I’d instrument: **Kafka lag**, **hot SKU partition**, or **cache stampede** on a viral PDP.” |
+| **Anchor** | “Say **once** with conviction—see [§5.0 Bottleneck anchor](#bottleneck-anchor-once).” |
 | **Production voice** | “**Viral PDP** → **stampede** on cache miss—**single-flight + jitter**; **Kafka lag** → shed **analytics** partitions first; **bad beacons** → **DLQ**, not **blocking** catalog.” |
 
 This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
 
-**Taking a stance:** *“I’d default **Mongo/JSON** (or Postgres JSONB) for **flexible** PDP reads, **OpenSearch** delegated for **keyword**, and **Kafka** as the **system of record** for behavior—**never** coupling aggregate freshness to **p99 PDP**.”*
+<a id="bottleneck-anchor-once"></a>
+### 5.0 🎯 Bottleneck anchor (say once in deep dive)
+
+**Say it once, clearly:** *“The main bottleneck I expect here is either **hot SKU** causing **partition skew** (and cache / read amplification), **or** **Kafka consumer lag** affecting how **fresh** trending feels—not the same as PDP being down.*
+
+*That’s what I’d **instrument first**: skewed partitions, **lag**, and **p99 PDP** together—then decide whether to fix **ingest**, **aggregation**, or **read path**.”*
+
+**Taking a stance:** *“I’d **start with Mongo** for flexible **PDP/PLP** documents and denormalized snippets; I’d **revisit Postgres** (JSONB or relational) only if **reporting and joins** become the main pain. **OpenSearch** stays delegated for **keyword**; **Kafka** is the **system of record** for behavior—**never** coupling aggregate freshness to **p99 PDP**.”*
 
 ### 5.1 Browse read (PDP)
 
@@ -408,10 +434,10 @@ sequenceDiagram
 
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
-| **Mongo vs SQL** | “**Flex** for catalog vs **joins** for reporting—pick for **this** workload.” |
+| **Mongo vs SQL** | “**I’d start with Mongo** for catalog at this shape; **I’d move to SQL** when **joins and reporting** on catalog entities **dominate** engineering time or query patterns.” |
 | **Windows** | “Bigger trending window = **smooth**; tiny = **noisy**.” |
 | **Kafka vs direct write** | “Direct to Mongo loses **replay** and **fan-out**; Kafka is the **log**.” |
-| **My default (catalog)** | “**Document store** + **cache-aside** for PDP; **SQL** when reporting/joins **dominate**.” |
+| **My default (catalog)** | “**Mongo + cache-aside** for PDP/PLP; **SQL** only if **joins/reporting** become the **primary** bottleneck.” |
 | **My default (signals)** | “**Kafka** + **idempotent** consumers; **weighted** purchase > cart > view for **rollups**.” |
 
 ### 8.1 Product tradeoffs
@@ -536,7 +562,7 @@ Endgame is **short** and **conversational**: use **`#### Human interaction`** un
 | **Narrate intent** before two pipes | Listing stores with no story |
 | **Ask** where to go deeper | Assuming the hour is one thread |
 | **Reflect back** after clarify | Many questions with no pause |
-| **Default + caveat** on Mongo vs SQL / Kafka | “We could do everything…” with no pick |
+| **Default + caveat** (Mongo-first catalog, Kafka log) | “We could do everything…” with no pick |
 | **Time-box** your own talking | Finishing every subsection because it’s in the doc |
 
 **60-minute sketch (flex):** clarify+FR+NFR ~8–12 · scale+APIs ~8–12 · architecture ~8–12 · **deep dive ~15–22** · scale→monitoring ~10–15 · patterns+close ~5–8.
