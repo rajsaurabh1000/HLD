@@ -4,6 +4,16 @@
 
 ## 1. Clarify requirements
 
+### 1.0 Live flow (how to open and steer)
+
+<a id="live-flow-open"></a>
+
+**Opening (~once):** *“I’ll align on **edge vs level** alerts, **channels + cost**, **quiet hours**, **tick→notify SLO**; then **scale**, **APIs + state**, **architecture**, and **one tick** through **match → dedupe → outbox**. I’ll **pause after the diagram**—depth on **hot symbols**, **dedupe**, or **provider failure**?”*
+
+**Thinking transitions:** *“The dedupe key is …”* · *“If SMS is money I’d …”* · *“Let me sanity-check …”* · *“One tradeoff: coalesce vs precision …”*
+
+**Live rule:** **Paraphrase** §1–2 tables; don’t read every row. Go deep **only if they probe**.
+
 <a id="say-1-questions-human"></a>
 ### 1.1 Clarify 
 
@@ -24,6 +34,8 @@
 #### Human interaction (FR — how to explain after alignment)
 
 **Habit:** *“**Rules**, **ticks**, **match**, **deliver**—four verbs.”*
+
+**Live:** one **spoken** FR pass (~60–90 s); use [§1.0](#live-flow-open) when you move **FR → NFR**.
 
 | FR area | Say it like this in the room |
 |---------|-------------------------------|
@@ -62,6 +74,12 @@
 | **Cost** | “**Rate limit** and **shape** SMS; **circuit breaker** on providers.” |
 | **Security** | “**Auth** on rule APIs; **vault** for provider secrets.” |
 
+#### UX on alerts (say with NFR)
+
+- **Flapping price:** **cooldown** + copy that doesn’t blame the user (“**still above** your alert—no new crossing”).  
+- **Quiet hours:** **queue** with **morning digest** or **suppress**—pick one and say it.  
+- **Delayed market data:** **disclose** in template if compliance/product requires it.
+
 **Throughput**
 
 - Very high tick rate on **liquid** symbols; **horizontal** matchers.
@@ -86,9 +104,18 @@
 
 - **AuthN** on rule APIs; **no** leaking other users’ rules; **secrets** for providers in vault.
 
+<a id="key-insight-say-early"></a>
 ### 1.4 Invariants (one sentence you repeat under pressure)
 
 **Invariant:** “No **unbounded** duplicate notifications for the **same logical crossing** without an explicit **repeat** / **cooldown** policy.”
+
+#### Key anchors (say these confidently—any order)
+
+1. “**Partition** ticks by **`symbol`**—skew is the design.”  
+2. “**Dedupe** on **crossing**, not every raw tick.”  
+3. “**Outbox** before **SMS**—**breaker** + **retry** on providers.”  
+4. “**Rule version** or snapshot—no silent **mid-flight** behavior changes.”  
+5. “**At-least-once** pipeline; **at-most-once per crossing** to the user.”
 
 <a id="say-voice-1"></a>
 
@@ -107,6 +134,8 @@
 #### Human interaction (estimate scale)
 
 **Habit:** *“**Skew** is the story—mega-cap symbols.”*
+
+**Live:** *“Let me sanity-check…”* **ticks/sec hot symbol**, **rules per symbol**, **channel mix**—**invite correction**.
 
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
@@ -136,6 +165,7 @@
 | **APIs** | “CRUD **rules**; internal **tick produce** keyed by **symbol**.” |
 | **State** | “**last_price** / FSM per **(user, rule)** in Redis or SQL.” |
 | **Outbox** | “Rows with **`dedupe_key`**, channel, status—workers **retry** safely.” |
+| **Core split (once)** | Same as [Key insight / invariant](#key-insight-say-early)—**match** idempotently, **deliver** through **outbox**. |
 
 ### 3.1 APIs (sketch)
 
@@ -168,6 +198,7 @@
 | **Log** | “Ticks land in **Kafka/Pulsar** keyed by **`symbol`**.” |
 | **Match** | “Matchers pull **rules** for that symbol, run **edge FSM**, then **dedupe**.” |
 | **Send** | “**Outbox** per channel with **breakers** on Twilio/FCM/etc.” |
+| **Steer** | “**Deeper** on **hot symbol**, **dedupe keys**, or **DLQ / replay** next?” |
 
 ```mermaid
 flowchart LR
@@ -191,6 +222,16 @@ flowchart LR
 
 **Partition:** `hash(symbol) % N`; optional **dedicated** partitions for **top 10** symbols.
 
+### 4.1 How we’d evolve this (if they ask “phases / MVP”)
+
+| Phase | Ship | Why |
+|-------|------|-----|
+| **1 — MVP** | **Single region**, **partitioned log**, **edge FSM**, **email/push** first, basic **dedupe** | Learn semantics + cost |
+| **2 — Growth** | **SMS** with **strict** rate limits + **quiet hours**, **hot-symbol** lanes, **coalesce** option | Cost + skew |
+| **3 — Scale** | **Dedicated** mega-cap partitions, **advanced** anti-flap, **multi-region** ingest | Tail + compliance |
+
+**Taking a stance:** *“I’d ship **email/push** before **SMS**; I’d treat **dedupe on crossing** as non-negotiable the day we pay per segment.”*
+
 ---
 
 ## 5. Deep dive: tick to notify
@@ -205,8 +246,12 @@ flowchart LR
 | **Ingest** | “Normalize **`seq`**; produce to **symbol partition**.” |
 | **Match** | “Load rules; read **state**; **edge detect**; apply **cooldown**.” |
 | **Deliver** | “**Dedupe key** per crossing; enqueue **outbox**; channel worker **retries** with **breaker**.” |
+| **Production voice** | “**Market open** thundering herd—**stagger** matchers; **Twilio 5xx**—**DLQ** not duplicate SMS; **gap** in **seq**—**replay** vendor window.” |
+| **Anchor** | “Watch **tick→notify p99**, **matcher lag**, **SMS $/hour**, **dedupe hit rate**.” |
 
 This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
+
+**Taking a stance:** *“I’d default **Kafka keyed by symbol** + **stateful matcher** per partition + **outbox per channel**; I’d add **coalesce** only if the room trades precision for **CPU** explicitly.”*
 
 ```mermaid
 sequenceDiagram
@@ -270,6 +315,9 @@ sequenceDiagram
 |-------|-------------------------------|
 | **Gaps** | “Detect missing **seq**; **replay** from vendor; honest **stale** UX if needed.” |
 | **Providers** | “**DLQ** + delayed retry; don’t drop **crossing intent** until channel **acks**.” |
+| **Incident tone** | “**Duplicate SMS** after provider timeout—**idempotent** send keys; **matcher** stuck—**partition lag**; **bad rule**—**version** + **kill switch**.” |
+
+**UX tie-in (say aloud):** *“**Cooldown** is a product feature, not an implementation detail—users feel **spam** faster than **5s extra latency**.”*
 
 - **Feed gap:** gap detector; **replay** request to vendor; user-visible **stale** banner if needed.  
 - **Poison message:** **DLQ**; fix and **replay**.  
@@ -289,6 +337,8 @@ sequenceDiagram
 |-------|-------------------------------|
 | **Coalesce** | “Batch ticks—cheaper, less **precise**.” |
 | **Pull rules** | “DB each tick—**fresh**; cache+TTL—**fast** but **staler**.” |
+| **My default (ticks)** | “**Append-only log** + **horizontal matchers**—never **lossy** silent drops.” |
+| **My default (notify)** | “**Outbox** + **channel breakers**; **SMS** last-class citizen behind **caps**.” |
 
 | Choice | Good | Bad |
 |--------|------|-----|
@@ -372,6 +422,8 @@ Name **partitioned stream**, **FSM**, **outbox**, **breaker** on the diagram.
 
 **Habit:** *“**Edge-triggered FSM**, **dedupe**, **outbox**, **adapter** per channel.”*
 
+**Live:** **at most four** patterns on the pipeline; then stop.
+
 | You mean… | Say it like this in the room |
 |-----------|-------------------------------|
 | **Patterns** | “**Partitioned** tick log; **state machine** per rule; **outbox** for reliable send; **chain** quiet hours→dedupe→throttle.” |
@@ -381,7 +433,20 @@ Name **partitioned stream**, **FSM**, **outbox**, **breaker** on the diagram.
 
 ## Closing notes (where wrap-up human interaction lives)
 
-Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups) and [60-second close](#60-second-close).
+Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Communication (do vs avoid)](#communication-do-vs-avoid), and [60-second close](#60-second-close).
+
+<a id="communication-do-vs-avoid"></a>
+### Communication (do vs avoid)
+
+| Do (sounds senior) | Avoid (sounds rehearsed) |
+|--------------------|---------------------------|
+| **Define crossing vs tick** early | 10 minutes on Kafka internals first |
+| **Name cost** for SMS | Ignoring provider limits |
+| **Checkpoint** after diagram | One linear script |
+| **Default dedupe policy** | “We’ll handle duplicates somehow” |
+| **Time-box** | Every channel deep dive |
+
+**60-minute sketch (flex):** clarify+FR+NFR ~8–12 · scale+APIs ~8–12 · architecture ~8–12 · **deep dive ~15–22** · scale→monitoring ~10–15 · patterns+close ~5–8.
 
 ---
 
