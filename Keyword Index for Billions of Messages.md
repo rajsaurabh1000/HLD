@@ -4,6 +4,16 @@
 
 ## 1. Clarify requirements
 
+### 1.0 Live flow (how to open and steer)
+
+<a id="live-flow-open"></a>
+
+**Opening (~once):** *“I’ll align on **AND vs OR**, **phrase/proximity**, **index scope** (per user/chat/org), rough **search p99**; then **scale**, **data layout**, **architecture**, and **query path** end-to-end. I’ll **pause after the diagram**—depth on **intersection**, **sharding**, or **compaction**?”*
+
+**Thinking transitions:** *“The expensive part is …”* · *“If I cap work I’d …”* · *“Let me sanity-check …”* · *“At billions scale the invariant is …”*
+
+**Live rule:** **Paraphrase** §1–2 tables; don’t read every row. Go deep **only if they probe**.
+
 <a id="say-1-questions-human"></a>
 ### 1.1 Clarify 
 
@@ -24,6 +34,8 @@
 #### Human interaction (FR — how to explain after alignment)
 
 **Habit:** *“**Index build** + **query** + **authz scope**.”*
+
+**Live:** one **spoken** FR pass (~60–90 s); use [§1.0](#live-flow-open) when you move **FR → NFR**.
 
 | FR area | Say it like this in the room |
 |---------|-------------------------------|
@@ -58,6 +70,12 @@
 | **Latency** | “**Rarest-first AND**, **skipTo**, **caps** on postings scanned.” |
 | **Privacy** | “**AuthZ** on shard route every time; **redact** queries in logs.” |
 
+#### UX on search (say with NFR)
+
+- **Slow query:** return **partial** page + **cursor** + honest **timeout**—don’t hang the client.  
+- **No results:** distinguish **zero hits** vs **auth-filtered** when product allows safe copy.  
+- **Index lag:** if messages appear “late” in search, **label** or cap **staleness** in UX.
+
 **Scale**
 
 - **Billions** of postings; **disk-backed** structures; **streaming** iterators.
@@ -78,9 +96,18 @@
 
 - **AuthZ** on every query; **encrypt at rest** for regulated tenants; **audit** access.
 
+<a id="key-insight-say-early"></a>
 ### 1.4 Invariants (one sentence you repeat under pressure)
 
 **Invariant:** “We never return a message the caller is **not authorized** to see; index partitions are **isolated** by tenant/chat policy.”
+
+#### Key anchors (say these confidently—any order)
+
+1. “**Disk-backed** postings—**stream**, don’t **RAM** materialize billions of ids.”  
+2. “**Multi-term AND** = **rarest-first** + **`skipTo`** / **galloping**.”  
+3. “**Cap** `max_postings_scan`—bounded work per query.”  
+4. “**Shard** aligns with **authz** boundaries—**no** cross-tenant fan-in.”  
+5. “**Tombstones** + **merge** for deletes/edits; **rebuild** from message log.”
 
 <a id="say-voice-1"></a>
 
@@ -99,6 +126,8 @@
 #### Human interaction (estimate scale)
 
 **Habit:** *“Billions ⇒ **shard + segment + cap**.”*
+
+**Live:** *“Let me sanity-check…”* **total messages**, **QPS**, **shard scope**—**invite correction** before the dimension table.
 
 | Topic | Say it like this in the room |
 |-------|-------------------------------|
@@ -127,6 +156,7 @@
 |-------|-------------------------------|
 | **API** | “**GET** search with `after_seq` **pagination**; multi-term **mode=and**.” |
 | **Layout** | “**Segments** are immutable; **merge** in the background like Lucene-style engines.” |
+| **Core split (once)** | Same as [Key insight / invariant](#key-insight-say-early)—**authz** + **disk iterators**, not RAM tries. |
 
 ### 3.1 APIs (sketch)
 
@@ -159,6 +189,7 @@
 |--------|------------------------------|
 | **Write** | “Tokenize → **posting writer** → **segment files** per shard.” |
 | **Read** | “Dictionary lookup → **iterators** → **merge/intersect**—bounded work.” |
+| **Steer** | “**Deeper** on **intersection**, **compaction**, or **failure/rebuild** next?” |
 
 ```mermaid
 flowchart LR
@@ -171,6 +202,16 @@ flowchart LR
 ```
 
 **Narration:** “**Writes** append postings into **segments**; **reads** open **iterators** on compressed blocks; **queries** never load full lists into RAM.”
+
+### 4.1 How we’d evolve this (if they ask “phases / MVP”)
+
+| Phase | Ship | Why |
+|-------|------|-----|
+| **1 — MVP** | Single-term **stream** + **pagination**, basic **sharding**, simple **segments** | Prove disk + authz story |
+| **2 — Growth** | **Multi-term AND**, **rarest-first** + **`skipTo`**, **compaction** pool | Latency at scale |
+| **3 — Scale** | **Roaring**/block max scores, **tiered** storage, **WAND**/top-K early exit | Hot terms + cost |
+
+**Taking a stance:** *“I’d ship **phase 1** with strict **per-query caps**; I’d add **phrase positions** only when the room confirms **phrase** is in scope.”*
 
 ---
 
@@ -187,8 +228,12 @@ flowchart LR
 | **AND** | “Order terms by **df**; walk the **shortest** list; **`skipTo`** on the others—**galloping** inside blocks.” |
 | **Phrase** | “Need **positions**—verify adjacency after AND narrows candidates.” |
 | **Anti-trie** | “Trie helps **prefix completion**; it doesn’t replace **compressed postings** at billions scale.” |
+| **Production voice** | “**Hot term** query—**postings scanned** explodes; **compaction** backlog—**throttle** writes; **corrupt segment**—**checksum** + **rebuild** from log.” |
+| **Anchor** | “First chart: **postings scanned p99**, **merge lag**, **index bytes** per shard.” |
 
 This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar Raiser time should go.
+
+**Taking a stance:** *“I’d default **custom on-disk inverted index** when **cost + tail control** matter; **managed OpenSearch** when **velocity** wins and the room accepts **$$** and less low-level tuning.”*
 
 ### 5.1 Single keyword
 
@@ -246,6 +291,9 @@ This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar 
 |-------|-------------------------------|
 | **Corruption** | “Detect bad blocks; **rebuild** shard from message log.” |
 | **Partial** | “Return **partial page** + flag vs hard fail—product call.” |
+| **Incident tone** | “**Runaway AND** on common terms—**rarest-first** + **caps**; **bad deploy** segment—**rollback** + **reindex**; **OOM** on merge—**bulkhead** compactors.” |
+
+**UX tie-in (say aloud):** *“**Timeout** → partial results + **retry cursor**; never leak **other tenants’** hits ‘as empty’ without thinking through copy.”*
 
 - **Replica** index shards; **failover** read path.  
 - **Corrupt segment:** checksum; **rebuild** from source of truth messages.  
@@ -265,6 +313,8 @@ This is **step 5** of the [spine](#interview-spine-nine-steps)—where most Bar 
 |-------|-------------------------------|
 | **RAM map** | “Doesn’t scale—same failure mode as naive trie story.” |
 | **Managed** | “OpenSearch/ES ships faster; **cost** and less **low-level** control.” |
+| **My default (engine)** | “**Managed** for most teams; **custom segments** if **p99 + $/query** dominates.” |
+| **My default (AND)** | “**Rarest-first** + **`skipTo`** before clever **RAM** structures.” |
 
 | Option | Good | Bad |
 |--------|------|-----|
@@ -348,6 +398,8 @@ Tie **inverted index**, **sharding**, **CQRS-lite** to the diagram.
 
 **Habit:** *“**Iterator** merge, **Strategy** for intersect order, **CQRS-lite** from message log.”*
 
+**Live:** **at most four** patterns; tie each to **write** vs **read** path; then stop.
+
 | You mean… | Say it like this in the room |
 |-----------|-------------------------------|
 | **Patterns** | “**Inverted index** on disk; **shard** by tenant; **idempotent indexer**; **breaker** on heavy deps.” |
@@ -358,6 +410,21 @@ Tie **inverted index**, **sharding**, **CQRS-lite** to the diagram.
 ## Closing notes (where wrap-up human interaction lives)
 
 Optional: [coding sketch](#optional-coding-sketch) if they ask for pseudocode.
+
+Use **`#### Human interaction`** under [Bar-raiser](#bar-raiser-follow-ups), [Communication (do vs avoid)](#communication-do-vs-avoid), and [60-second close](#60-second-close).
+
+<a id="communication-do-vs-avoid"></a>
+### Communication (do vs avoid)
+
+| Do (sounds senior) | Avoid (sounds rehearsed) |
+|--------------------|---------------------------|
+| **Draw iterator** intersection | Explaining Lucene for 20 minutes unprompted |
+| **Cap work** explicitly | “We’ll optimize later” |
+| **AuthZ every shard** | Ignoring tenant isolation |
+| **Default managed vs custom** | Fence-sitting with no pick |
+| **Pause for steering** | One long monologue |
+
+**60-minute sketch (flex):** clarify+FR+NFR ~8–12 · scale+APIs ~8–12 · architecture ~8–12 · **deep dive ~15–22** · scale→monitoring ~10–15 · patterns+close ~5–8.
 
 ---
 
@@ -387,6 +454,8 @@ Optional: [coding sketch](#optional-coding-sketch) if they ask for pseudocode.
 | **Recap** | “**Inverted index** on disk—**sorted compressed postings**; single term **stream** + **pagination**; multi-term **AND** via **rarest-first** + **`skipTo`**; **shard** for **privacy** and scale; **compaction**; monitor **postings scanned** and **p99**.” |
 
 ---
+
+<a id="optional-coding-sketch"></a>
 
 ### Optional coding sketch
 
