@@ -1,0 +1,1667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Uber Eats HLD — SDE-2 Bar Raiser Interview Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@400;600&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --uber-black: #0a0a0a;
+    --uber-dark: #141414;
+    --uber-card: #1a1a1a;
+    --uber-border: #2a2a2a;
+    --uber-green: #06C167;
+    --uber-green-dim: rgba(6,193,103,0.15);
+    --uber-green-glow: rgba(6,193,103,0.08);
+    --uber-amber: #F5A623;
+    --uber-amber-dim: rgba(245,166,35,0.15);
+    --uber-red: #E74C3C;
+    --uber-red-dim: rgba(231,76,60,0.12);
+    --uber-blue: #5B9BD5;
+    --uber-blue-dim: rgba(91,155,213,0.12);
+    --uber-purple: #9B59B6;
+    --uber-purple-dim: rgba(155,89,182,0.12);
+    --text-primary: #F0F0F0;
+    --text-secondary: #999;
+    --text-muted: #666;
+    --mono: 'JetBrains Mono', monospace;
+    --serif: 'DM Serif Display', Georgia, serif;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--uber-black);
+    color: var(--text-primary);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+    min-height: 100vh;
+  }
+
+  /* ── NOISE OVERLAY ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none;
+    opacity: 0.4;
+  }
+
+  .wrapper {
+    position: relative; z-index: 1;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 24px 80px;
+  }
+
+  /* ── HERO ── */
+  .hero {
+    padding: 64px 0 48px;
+    border-bottom: 1px solid var(--uber-border);
+    margin-bottom: 48px;
+  }
+
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--uber-green-dim);
+    border: 1px solid rgba(6,193,103,0.3);
+    color: var(--uber-green);
+    font-family: var(--mono);
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    padding: 5px 12px; border-radius: 4px;
+    margin-bottom: 24px;
+  }
+
+  .hero-badge::before { content: '●'; font-size: 8px; animation: pulse 2s infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .hero h1 {
+    font-family: var(--serif);
+    font-size: clamp(32px, 5vw, 52px);
+    font-weight: 400;
+    line-height: 1.15;
+    color: var(--text-primary);
+    margin-bottom: 16px;
+  }
+
+  .hero h1 em {
+    font-style: italic;
+    color: var(--uber-green);
+  }
+
+  .hero-sub {
+    color: var(--text-secondary);
+    font-size: 16px;
+    max-width: 600px;
+    margin-bottom: 32px;
+  }
+
+  .hero-meta {
+    display: flex; flex-wrap: wrap; gap: 16px;
+  }
+
+  .meta-pill {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 4px 10px;
+    border: 1px solid var(--uber-border);
+    border-radius: 3px;
+  }
+
+  /* ── PROGRESS NAV ── */
+  .progress-nav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(10,10,10,0.92);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--uber-border);
+    padding: 12px 0;
+    margin: 0 -24px 48px;
+    padding-left: 24px; padding-right: 24px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .progress-nav::-webkit-scrollbar { display: none; }
+
+  .nav-steps {
+    display: flex; gap: 4px;
+    list-style: none;
+    white-space: nowrap;
+  }
+
+  .nav-step {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 5px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    color: var(--text-muted);
+    border: 1px solid transparent;
+    transition: all 0.2s;
+    user-select: none;
+  }
+
+  .nav-step:hover, .nav-step.active {
+    color: var(--uber-green);
+    border-color: rgba(6,193,103,0.3);
+    background: var(--uber-green-dim);
+  }
+
+  /* ── SECTIONS ── */
+  .section {
+    margin-bottom: 56px;
+    animation: fadeUp 0.5s ease both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .section-header {
+    display: flex; align-items: flex-start; gap: 16px;
+    margin-bottom: 28px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--uber-border);
+  }
+
+  .section-num {
+    font-family: var(--mono);
+    font-size: 11px; font-weight: 600;
+    color: var(--uber-green);
+    background: var(--uber-green-dim);
+    border: 1px solid rgba(6,193,103,0.25);
+    padding: 3px 8px; border-radius: 3px;
+    white-space: nowrap; margin-top: 5px;
+  }
+
+  .section-title {
+    font-family: var(--serif);
+    font-size: clamp(22px, 3.5vw, 30px);
+    font-weight: 400;
+    line-height: 1.2;
+  }
+
+  .section-hint {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--uber-amber);
+    margin-top: 4px;
+  }
+
+  /* ── SAY IT BLOCK ── */
+  .say-block {
+    background: linear-gradient(135deg, rgba(6,193,103,0.06) 0%, rgba(6,193,103,0.02) 100%);
+    border: 1px solid rgba(6,193,103,0.25);
+    border-left: 3px solid var(--uber-green);
+    border-radius: 6px;
+    padding: 18px 20px;
+    margin: 16px 0;
+    position: relative;
+  }
+
+  .say-label {
+    font-family: var(--mono);
+    font-size: 10px; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--uber-green);
+    margin-bottom: 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .say-label::before { content: '🎙'; font-size: 12px; }
+
+  .say-text {
+    color: var(--text-primary);
+    font-size: 15px;
+    line-height: 1.65;
+    font-style: italic;
+  }
+
+  .say-text strong {
+    font-style: normal;
+    color: var(--uber-green);
+    font-weight: 600;
+  }
+
+  /* ── WARNING / CAUTION ── */
+  .warn-block {
+    background: var(--uber-amber-dim);
+    border: 1px solid rgba(245,166,35,0.3);
+    border-left: 3px solid var(--uber-amber);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 12px 0;
+    font-size: 14px;
+    color: var(--uber-amber);
+  }
+
+  .warn-block strong { font-weight: 700; }
+
+  /* ── INSIGHT ── */
+  .insight-block {
+    background: var(--uber-red-dim);
+    border: 1px solid rgba(231,76,60,0.3);
+    border-left: 3px solid var(--uber-red);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+
+  .insight-label {
+    font-family: var(--mono);
+    font-size: 10px; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--uber-red);
+    margin-bottom: 6px;
+  }
+
+  /* ── THINK BLOCK ── */
+  .think-block {
+    background: var(--uber-purple-dim);
+    border: 1px solid rgba(155,89,182,0.3);
+    border-left: 3px solid var(--uber-purple);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+
+  .think-label {
+    font-family: var(--mono);
+    font-size: 10px; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--uber-purple);
+    margin-bottom: 6px;
+  }
+
+  /* ── CARD GRID ── */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+  }
+
+  .card {
+    background: var(--uber-card);
+    border: 1px solid var(--uber-border);
+    border-radius: 8px;
+    padding: 16px 18px;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+
+  .card:hover {
+    border-color: rgba(6,193,103,0.3);
+    transform: translateY(-2px);
+  }
+
+  .card-label {
+    font-family: var(--mono);
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--uber-green);
+    margin-bottom: 6px;
+  }
+
+  .card-content {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  /* ── TABLE ── */
+  .styled-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+
+  .styled-table thead tr {
+    border-bottom: 2px solid var(--uber-border);
+  }
+
+  .styled-table th {
+    font-family: var(--mono);
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-muted);
+    padding: 10px 12px;
+    text-align: left;
+  }
+
+  .styled-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    color: var(--text-secondary);
+    vertical-align: top;
+  }
+
+  .styled-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .styled-table td:first-child {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--uber-amber);
+    white-space: nowrap;
+  }
+
+  /* ── CODE BLOCK ── */
+  .code-block {
+    background: #0d0d0d;
+    border: 1px solid var(--uber-border);
+    border-radius: 6px;
+    padding: 18px 20px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    overflow-x: auto;
+    margin: 16px 0;
+    color: #a8d8a8;
+  }
+
+  .code-comment { color: #555; }
+  .code-key { color: var(--uber-amber); }
+  .code-val { color: var(--uber-green); }
+  .code-label { color: var(--uber-blue); }
+
+  /* ── PHASE TIMELINE ── */
+  .phases {
+    display: flex; flex-direction: column; gap: 0;
+    margin: 16px 0;
+    position: relative;
+  }
+
+  .phases::before {
+    content: '';
+    position: absolute; left: 22px; top: 28px; bottom: 28px;
+    width: 1px; background: var(--uber-border);
+  }
+
+  .phase {
+    display: flex; gap: 20px;
+    padding: 16px 0;
+  }
+
+  .phase-dot {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 13px; font-weight: 700;
+    flex-shrink: 0;
+    position: relative; z-index: 1;
+  }
+
+  .phase-dot.v1 { background: var(--uber-green-dim); border: 2px solid var(--uber-green); color: var(--uber-green); }
+  .phase-dot.v2 { background: var(--uber-amber-dim); border: 2px solid var(--uber-amber); color: var(--uber-amber); }
+  .phase-dot.v3 { background: var(--uber-purple-dim); border: 2px solid var(--uber-purple); color: var(--uber-purple); }
+
+  .phase-content { flex: 1; padding-top: 8px; }
+  .phase-title { font-weight: 600; margin-bottom: 4px; font-size: 15px; }
+  .phase-desc { color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
+
+  /* ── INVARIANT BOX ── */
+  .invariant {
+    background: linear-gradient(135deg, rgba(231,76,60,0.1) 0%, rgba(231,76,60,0.04) 100%);
+    border: 2px solid rgba(231,76,60,0.4);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin: 20px 0;
+    text-align: center;
+  }
+
+  .invariant-title {
+    font-family: var(--mono);
+    font-size: 10px; font-weight: 700;
+    letter-spacing: 0.15em; text-transform: uppercase;
+    color: var(--uber-red);
+    margin-bottom: 10px;
+  }
+
+  .invariant-text {
+    font-family: var(--serif);
+    font-size: 18px;
+    line-height: 1.5;
+    color: var(--text-primary);
+  }
+
+  /* ── PIPELINE FLOW ── */
+  .pipeline {
+    display: flex; align-items: stretch;
+    flex-wrap: wrap; gap: 0;
+    margin: 20px 0;
+    background: var(--uber-card);
+    border: 1px solid var(--uber-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .pipe-step {
+    flex: 1; min-width: 100px;
+    padding: 14px 12px;
+    border-right: 1px solid var(--uber-border);
+    position: relative;
+    text-align: center;
+    transition: background 0.2s;
+  }
+
+  .pipe-step:last-child { border-right: none; }
+  .pipe-step:hover { background: rgba(6,193,103,0.06); }
+
+  .pipe-step-num {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  .pipe-step-name {
+    font-size: 12px; font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+  }
+
+  .pipe-step-note {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+
+  .pipe-step.strict .pipe-step-name { color: var(--uber-red); }
+  .pipe-step.fast .pipe-step-name { color: var(--uber-green); }
+  .pipe-step.bound .pipe-step-name { color: var(--uber-amber); }
+
+  /* ── BOTTLENECK GRID ── */
+  .bottleneck-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+  }
+
+  .bottleneck-card {
+    background: var(--uber-card);
+    border: 1px solid var(--uber-border);
+    border-radius: 8px;
+    padding: 16px;
+    border-top: 3px solid var(--uber-red);
+  }
+
+  .bottleneck-card.medium { border-top-color: var(--uber-amber); }
+  .bottleneck-card.low { border-top-color: var(--uber-blue); }
+
+  .bottleneck-name {
+    font-family: var(--mono); font-size: 12px; font-weight: 700;
+    color: var(--text-primary); margin-bottom: 6px;
+  }
+
+  .bottleneck-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
+
+  .bottleneck-fix {
+    font-size: 12px; color: var(--uber-green);
+    font-family: var(--mono);
+  }
+
+  /* ── TRADEOFF TABLE ── */
+  .tradeoff-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1px;
+    background: var(--uber-border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 8px 0;
+  }
+
+  .tradeoff-cell {
+    background: var(--uber-card);
+    padding: 12px 14px;
+    font-size: 13px;
+  }
+
+  .tradeoff-cell.decision { font-family: var(--mono); font-size: 12px; color: var(--uber-amber); }
+  .tradeoff-cell.up { color: var(--uber-green); }
+  .tradeoff-cell.down { color: var(--uber-red); }
+
+  .tradeoff-header .tradeoff-cell {
+    font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-muted);
+    background: rgba(0,0,0,0.3);
+  }
+
+  /* ── DIVIDER ── */
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--uber-border), transparent);
+    margin: 40px 0;
+  }
+
+  /* ── COLLAPSE ── */
+  .collapsible {
+    background: var(--uber-card);
+    border: 1px solid var(--uber-border);
+    border-radius: 8px;
+    margin: 12px 0;
+    overflow: hidden;
+  }
+
+  .collapse-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 18px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s;
+  }
+
+  .collapse-header:hover { background: rgba(255,255,255,0.03); }
+
+  .collapse-title {
+    font-family: var(--mono); font-size: 13px; font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .collapse-icon {
+    font-size: 14px; color: var(--text-muted);
+    transition: transform 0.2s;
+  }
+
+  .collapse-body {
+    display: none;
+    padding: 16px 18px;
+    border-top: 1px solid var(--uber-border);
+  }
+
+  .collapsible.open .collapse-body { display: block; }
+  .collapsible.open .collapse-icon { transform: rotate(180deg); }
+
+  /* ── HIGHLIGHT INLINE ── */
+  .hl { color: var(--uber-green); font-weight: 600; }
+  .hl-amber { color: var(--uber-amber); font-weight: 600; }
+  .hl-red { color: var(--uber-red); font-weight: 600; }
+  .hl-blue { color: var(--uber-blue); }
+  .mono { font-family: var(--mono); font-size: 13px; background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; }
+
+  /* ── CHECKLIST ── */
+  .checklist { list-style: none; margin: 12px 0; }
+  .checklist li {
+    padding: 6px 0 6px 24px;
+    position: relative; font-size: 14px; color: var(--text-secondary);
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+  }
+  .checklist li::before {
+    content: '✓';
+    position: absolute; left: 0;
+    color: var(--uber-green); font-weight: 700;
+    font-family: var(--mono); font-size: 12px;
+  }
+
+  /* ── TIMING BAR ── */
+  .timing-bar {
+    display: flex; gap: 2px;
+    margin: 20px 0;
+    border-radius: 6px; overflow: hidden;
+    height: 40px;
+  }
+
+  .timing-seg {
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 10px; font-weight: 600;
+    text-align: center; padding: 4px;
+    transition: opacity 0.2s;
+  }
+
+  .timing-seg:hover { opacity: 0.8; }
+  .t1 { background: rgba(6,193,103,0.5); color: white; flex: 2; }
+  .t2 { background: rgba(245,166,35,0.5); color: white; flex: 2; }
+  .t3 { background: rgba(91,155,213,0.5); color: white; flex: 3; }
+  .t4 { background: rgba(155,89,182,0.5); color: white; flex: 2; }
+  .t5 { background: rgba(231,76,60,0.5); color: white; flex: 1; }
+
+  /* ── FAQ ── */
+  .faq-item {
+    border: 1px solid var(--uber-border);
+    border-radius: 8px;
+    margin: 8px 0;
+    overflow: hidden;
+  }
+
+  .faq-q {
+    padding: 14px 18px;
+    cursor: pointer;
+    font-weight: 500;
+    display: flex; justify-content: space-between; align-items: center;
+    transition: background 0.2s;
+    background: var(--uber-card);
+  }
+
+  .faq-q:hover { background: rgba(255,255,255,0.03); }
+
+  .faq-q-text { font-size: 14px; color: var(--text-primary); }
+  .faq-q-tag {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--uber-amber); background: var(--uber-amber-dim);
+    border: 1px solid rgba(245,166,35,0.3);
+    padding: 2px 8px; border-radius: 3px; white-space: nowrap; margin-left: 12px;
+  }
+
+  .faq-a {
+    display: none;
+    padding: 14px 18px;
+    font-size: 14px; color: var(--text-secondary);
+    border-top: 1px solid var(--uber-border);
+    background: rgba(0,0,0,0.2);
+    line-height: 1.7;
+  }
+
+  .faq-item.open .faq-a { display: block; }
+
+  /* ── CLOSING ── */
+  .closing-card {
+    background: linear-gradient(135deg, rgba(6,193,103,0.1) 0%, rgba(6,193,103,0.03) 100%);
+    border: 1px solid rgba(6,193,103,0.3);
+    border-radius: 10px;
+    padding: 28px 32px;
+    text-align: center;
+  }
+
+  .closing-title {
+    font-family: var(--serif);
+    font-size: 24px;
+    margin-bottom: 12px;
+  }
+
+  .closing-text {
+    color: var(--text-secondary);
+    font-size: 15px;
+    max-width: 500px;
+    margin: 0 auto 20px;
+  }
+
+  .closing-pills {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;
+  }
+
+  .closing-pill {
+    font-family: var(--mono); font-size: 12px;
+    padding: 5px 12px;
+    background: rgba(6,193,103,0.12);
+    border: 1px solid rgba(6,193,103,0.3);
+    border-radius: 100px;
+    color: var(--uber-green);
+  }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 600px) {
+    .tradeoff-row { grid-template-columns: 1fr; }
+    .pipeline { flex-direction: column; }
+    .pipe-step { border-right: none; border-bottom: 1px solid var(--uber-border); }
+    .pipe-step:last-child { border-bottom: none; }
+    .timing-bar { height: auto; flex-wrap: wrap; }
+    .timing-seg { min-width: 60px; }
+  }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--uber-border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #444; }
+
+  /* ── PRINT ── */
+  @media print {
+    .progress-nav { display: none; }
+    .section { animation: none; page-break-inside: avoid; }
+    body { background: white; color: black; }
+    .hero-badge, .say-block, .think-block { border: 1px solid #ccc; }
+  }
+
+  p { color: var(--text-secondary); margin-bottom: 10px; }
+  p:last-child { margin-bottom: 0; }
+
+  h3 { font-size: 16px; font-weight: 600; margin: 20px 0 10px; color: var(--text-primary); }
+  h4 { font-family: var(--mono); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin: 16px 0 8px; }
+</style>
+</head>
+<body>
+
+<div class="wrapper">
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-badge">Bar Raiser · SDE-2 · Uber Netherlands</div>
+    <h1>Uber Eats Homepage<br><em>System Design</em></h1>
+    <p class="hero-sub">A complete human-style interview guide — what to say, how to think out loud, and how to drive the 60-minute session like a senior engineer.</p>
+    <div class="hero-meta">
+      <span class="meta-pill">~60 min interview</span>
+      <span class="meta-pill">10 sections</span>
+      <span class="meta-pill">Bar Raiser calibrated</span>
+      <span class="meta-pill">Read-path focused</span>
+    </div>
+  </div>
+
+  <!-- STICKY NAV -->
+  <nav class="progress-nav">
+    <ul class="nav-steps">
+      <li class="nav-step active" onclick="scrollTo('s0')">🗺 How to Use</li>
+      <li class="nav-step" onclick="scrollTo('s1')">§1 Clarify</li>
+      <li class="nav-step" onclick="scrollTo('s2')">§2 FR / NFR</li>
+      <li class="nav-step" onclick="scrollTo('s3')">§3 Framing</li>
+      <li class="nav-step" onclick="scrollTo('s4')">§4 Scale</li>
+      <li class="nav-step" onclick="scrollTo('s5')">§5 APIs</li>
+      <li class="nav-step" onclick="scrollTo('s6')">§6 Architecture</li>
+      <li class="nav-step" onclick="scrollTo('s7')">§7 Deep Dive</li>
+      <li class="nav-step" onclick="scrollTo('s8')">§8 Bottlenecks</li>
+      <li class="nav-step" onclick="scrollTo('s9')">§9 Reliability</li>
+      <li class="nav-step" onclick="scrollTo('s10')">§10 Tradeoffs</li>
+      <li class="nav-step" onclick="scrollTo('s11')">§11 Close</li>
+    </ul>
+  </nav>
+
+  <!-- S0: HOW TO USE -->
+  <div class="section" id="s0">
+    <div class="section-header">
+      <span class="section-num">META</span>
+      <div>
+        <div class="section-title">How to Use This Guide</div>
+        <div class="section-hint">Read this first — it's the most important page</div>
+      </div>
+    </div>
+
+    <div class="warn-block">
+      <strong>Don't read this doc out loud.</strong> These are your mental models. Look at it between beats — glance at the section, then speak from memory. If you're staring at the screen for more than 3 seconds, you've broken the vibe.
+    </div>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-label">What the Bar Raiser grades</div>
+        <div class="card-content">Ownership, honest tradeoffs, failure thinking, and whether you <em>design</em> or just <em>recite</em>. They want to see a senior engineer thinking, not a candidate performing.</div>
+      </div>
+      <div class="card">
+        <div class="card-label">The golden thread</div>
+        <div class="card-content">Every decision should flow from the requirements. When you say "I'd use Redis here," connect it back: "because we agreed browse can be a little stale and latency matters."</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Your default stance</div>
+        <div class="card-content">Always pick a side. "I'd start with X because Y — I'd revisit if Z" beats "we could do A or B" every time. Fence-sitting reads as junior.</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Pacing</div>
+        <div class="card-content">Clarify → FR/NFR → Framing → Scale → APIs → Architecture → Deep Dive → Close. The deep dive is ~20–25 min. Don't burn it all on architecture boxes.</div>
+      </div>
+    </div>
+
+    <h4>60-min skeleton</h4>
+    <div class="timing-bar">
+      <div class="timing-seg t1">Clarify<br>8–12 min</div>
+      <div class="timing-seg t2">Scale + APIs<br>8–10 min</div>
+      <div class="timing-seg t3">Architecture<br>8–12 min</div>
+      <div class="timing-seg t4">Deep Dive<br>18–22 min</div>
+      <div class="timing-seg t5">Close<br>5 min</div>
+    </div>
+
+    <h4>Thinking transitions (keep these natural)</h4>
+    <p style="color: var(--text-muted); font-size: 13px;">Sprinkle these between topics — they make it feel like you're designing, not reciting:</p>
+    <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
+      <span class="mono">"Let me think through this…"</span>
+      <span class="mono">"One tradeoff here is…"</span>
+      <span class="mono">"If I optimize for latency I'd…"</span>
+      <span class="mono">"This might become a bottleneck because…"</span>
+      <span class="mono">"I'd start simple and evolve when…"</span>
+      <span class="mono">"The reason I ask is it changes who owns the commit…"</span>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- S1: CLARIFY -->
+  <div class="section" id="s1">
+    <div class="section-header">
+      <span class="section-num">§ 01</span>
+      <div>
+        <div class="section-title">Clarify Requirements</div>
+        <div class="section-hint">Open with this — don't assume anything yet</div>
+      </div>
+    </div>
+
+    <p>The Bar Raiser is watching whether you <strong style="color:var(--uber-green)">control scope before drawing boxes</strong>. Clarifying isn't politeness — it's buying yourself the right to simplify later. Ask 2–3 targeted questions, reflect back what you heard, then move on.</p>
+
+    <div class="say-block">
+      <div class="say-label">Open the session with this</div>
+      <div class="say-text">
+        "Before I draw anything, I want to align on three things: <strong>what's actually in the homepage</strong>, <strong>how hard eligibility is versus ranking</strong>, and <strong>what p99 needs to feel like</strong> — because those three decisions control almost everything else I'm going to design. Can we go through those quickly?"
+      </div>
+    </div>
+
+    <h4>The 6 questions that matter</h4>
+    <table class="styled-table">
+      <thead><tr><th>Topic</th><th>Say it like this</th><th>Why it matters</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Homepage scope</td>
+          <td>"When you say homepage — are we doing the full experience: nearby restaurants, reorder strip, cuisine chips, promos, maybe sponsored slots? Or narrower?"</td>
+          <td>Changes whether you need a mixer, a feature store, sponsored ranking</td>
+        </tr>
+        <tr>
+          <td>Freshness on browse</td>
+          <td>"For the restaurant list itself — not checkout — is it okay if trending or popularity is a few seconds or minutes stale? Or does the product need it basically real-time?"</td>
+          <td>Drives how aggressively you can cache, which changes your whole architecture</td>
+        </tr>
+        <tr>
+          <td>p99 budget</td>
+          <td>"Roughly where should I set server-side p99 for the home payload — sub-100ms, or a few hundred ms? I need that to know how much ranking work is realistic."</td>
+          <td>Determines whether ranking can be online at all, or mostly precomputed</td>
+        </tr>
+        <tr>
+          <td>Location / GPS</td>
+          <td>"Am I assuming GPS + saved addresses, and do we fall back to IP or coarse location? If we do, does the product need to disclose that to the user?"</td>
+          <td>Changes geo logic, trust UX, and compliance handling</td>
+        </tr>
+        <tr>
+          <td>Search boundary</td>
+          <td>"Is text search in scope here, or should I treat it as a separate service and just link out?"</td>
+          <td>Big scope boundary — search is its own deep design</td>
+        </tr>
+        <tr>
+          <td>Personalization</td>
+          <td>"For v1, do you want real personalization rails or is generic + trending enough? That changes whether I'm putting a feature store on the hot path."</td>
+          <td>Avoids over-engineering v1 with ML infra that isn't needed yet</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="think-block">
+      <div class="think-label">After they answer — reflect back</div>
+      "So if browse staleness is fine, I can be more aggressive on caching and precomputing. And if p99 is, say, 200ms server-side, I have a real ranking budget. I'll keep eligibility — is this restaurant actually serviceable — separate from rank order. Sound good?"
+    </div>
+
+    <div class="warn-block">
+      <strong>Don't ask more than 3 questions in a row</strong> without pausing for their input. This should feel like a conversation, not an interrogation.
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- S2: FR / NFR -->
+  <div class="section" id="s2">
+    <div class="section-header">
+      <span class="section-num">§ 02</span>
+      <div>
+        <div class="section-title">Functional & Non-Functional Requirements</div>
+        <div class="section-hint">Lock these explicitly — everything else is derived from here</div>
+      </div>
+    </div>
+
+    <p>Don't just list features. Walk through FRs as "what we're building" and NFRs as "how it has to behave." This shows you understand the difference between product correctness and engineering constraints.</p>
+
+    <h3>Functional Requirements</h3>
+
+    <div class="say-block">
+      <div class="say-label">Say this out loud — ~60 seconds</div>
+      <div class="say-text">
+        "Based on what we aligned on — here's what we're actually building. The homepage needs to: <strong>resolve where the user is</strong>, then show only restaurants that are <strong>actually serviceable</strong> for that location. The response is a structured page — sections like reorder, near you, promos, cuisine chips — each with a type, title, items. Each restaurant card carries enough to make a decision: name, hero image, rating, ETA, delivery fee, open or closed, and an id to hand off to the detail page. Events like impressions are async — they're not on the critical read path."
+      </div>
+    </div>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-label">Core: Location + Eligibility</div>
+        <div class="card-content">Resolve lat/lng or saved address → only show restaurants that are in-zone, not hard-closed, not paused. This is a trust boundary, not a ranking preference.</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Core: Homepage Shape</div>
+        <div class="card-content">Structured sections (reorder strip, near you, promos, cuisine chips). Each section has a type, title, cursor/pagination, and items. Cards have enough data to decide to tap.</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Core: Async Events</div>
+        <div class="card-content">Impressions and clicks are emitted asynchronously — for analytics and ranking feedback. They never block the homepage response.</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Out of Scope</div>
+        <div class="card-content">Checkout, payment, driver dispatch, text search (delegated). Mention these explicitly so you control the boundary.</div>
+      </div>
+    </div>
+
+    <h3>Non-Functional Requirements</h3>
+
+    <div class="say-block">
+      <div class="say-label">The key NFR line</div>
+      <div class="say-text">
+        "I want to be explicit about <strong>tiered consistency</strong>. Hard eligibility — is this restaurant actually in my zone, is it open — that has to be correct. Ranking order, trending scores, cached ETAs? Those can be <strong>eventually consistent</strong> with an explicit staleness budget. Browse can be a little stale. 'You can order here' cannot be a lie."
+      </div>
+    </div>
+
+    <table class="styled-table">
+      <thead><tr><th>NFR</th><th>Target</th><th>What breaks if we ignore it</th></tr></thead>
+      <tbody>
+        <tr><td>Latency (p99)</td><td>~100–300ms server-side (confirm with interviewer)</td><td>Users bounce; ranking may need to be precomputed</td></tr>
+        <tr><td>Availability</td><td>Degrade sections, never hard 500 the page</td><td>Empty homepage = user opens competitor's app</td></tr>
+        <tr><td>Eligibility correctness</td><td>Strict — must not show ineligible restaurants</td><td>User taps through, can't order → trust destroyed</td></tr>
+        <tr><td>Ranking freshness</td><td>Eventually consistent, explicit staleness SLO</td><td>Slightly suboptimal order — acceptable for browse</td></tr>
+        <tr><td>Scalability</td><td>10k–100k reads/sec per region at peak</td><td>Lunch/dinner spikes → slowdown</td></tr>
+        <tr><td>Durability</td><td>Orders: ACID in OLTP</td><td>Lost orders = revenue and legal problem</td></tr>
+      </tbody>
+    </table>
+
+    <div class="invariant">
+      <div class="invariant-title">🔒 The Invariant — Say This Under Pressure</div>
+      <div class="invariant-text">"We never show a restaurant as orderable if it fails hard eligibility. <span style="color:var(--uber-amber)">Ranking may degrade.</span> <span style="color:var(--uber-red)">Eligibility cannot lie.</span>"</div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- S3: FRAMING -->
+  <div class="section" id="s3">
+    <div class="section-header">
+      <span class="section-num">§ 03</span>
+      <div>
+        <div class="section-title">Framing: User Journey + Consistency + Commit</div>
+        <div class="section-hint">Say this AFTER locking FR/NFR — not before</div>
+      </div>
+    </div>
+
+    <div class="warn-block">
+      <strong>Placement matters.</strong> This block only makes sense after you've locked requirements. If you say "user opens app…" before clarifying, it reads as a memorized script. Earn it first.
+    </div>
+
+    <div class="say-block">
+      <div class="say-label">Bridge into this section</div>
+      <div class="say-text">
+        "We've aligned on scope and I've stated FR/NFR from that. <strong>Based on those</strong>, let me describe the user-visible path, consistency model, and commit boundary — then I'll size the system and draw the architecture."
+      </div>
+    </div>
+
+    <h3>User Journey (say once, simply)</h3>
+    <div class="pipeline">
+      <div class="pipe-step fast">
+        <div class="pipe-step-num">1</div>
+        <div class="pipe-step-name">App Opens</div>
+        <div class="pipe-step-note">Location resolved, auth token sent</div>
+      </div>
+      <div class="pipe-step strict">
+        <div class="pipe-step-num">2</div>
+        <div class="pipe-step-name">Eligibility</div>
+        <div class="pipe-step-note">In-zone, open/closed — strict</div>
+      </div>
+      <div class="pipe-step bound">
+        <div class="pipe-step-num">3</div>
+        <div class="pipe-step-name">Rank</div>
+        <div class="pipe-step-note">Time-boxed, best-effort</div>
+      </div>
+      <div class="pipe-step fast">
+        <div class="pipe-step-num">4</div>
+        <div class="pipe-step-name">Assemble</div>
+        <div class="pipe-step-note">Sections built, ETag set</div>
+      </div>
+      <div class="pipe-step fast">
+        <div class="pipe-step-num">5</div>
+        <div class="pipe-step-name">Async</div>
+        <div class="pipe-step-note">Impressions → Kafka, off hot path</div>
+      </div>
+    </div>
+
+    <h3>Consistency Model</h3>
+    <div class="card-grid">
+      <div class="card" style="border-top: 2px solid var(--uber-red);">
+        <div class="card-label" style="color:var(--uber-red)">Strong Consistency Required</div>
+        <div class="card-content">Is this restaurant in my delivery zone? Is it open right now? This is a trust question — wrong answer breaks the user's ability to order. Must be correct.</div>
+      </div>
+      <div class="card" style="border-top: 2px solid var(--uber-amber);">
+        <div class="card-label" style="color:var(--uber-amber)">Eventually Consistent (explicit SLO)</div>
+        <div class="card-content">Ranking order, trending scores, cached ETAs, popularity signals. Can be seconds to minutes stale. Browse can tolerate this — ordering cannot.</div>
+      </div>
+    </div>
+
+    <h3>Commit Boundary</h3>
+    <div class="say-block">
+      <div class="say-label">Say this clearly — it shows systems thinking</div>
+      <div class="say-text">
+        "The homepage response commits when <strong>eligibility filtering is complete</strong> — that's a hard guarantee — and ranking is either done or we've hit the deadline and fallen back to a simpler ordering like distance or popularity. The user always gets a real response. It might not be the most personalized order, but it's always <strong>correct about serviceability</strong>."
+      </div>
+    </div>
+
+    <h3>Evolution — Phase It Honestly</h3>
+    <div class="phases">
+      <div class="phase">
+        <div class="phase-dot v1">V1</div>
+        <div class="phase-content">
+          <div class="phase-title">MVP — Ship and Learn</div>
+          <div class="phase-desc">Single metro. Geo filter + simple rank (distance + rating). Aggressive caching with honest staleness labels. Strict in-zone eligibility. This builds trust and shows what traffic actually looks like.</div>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase-dot v2">V2</div>
+        <div class="phase-content">
+          <div class="phase-title">Growth — Add Intelligence</div>
+          <div class="phase-desc">Feature-based ranking, reorder rail, personalization, stream aggregates for trending. Handle hot cells. Add partial degradation per section. But only when V1 metrics tell us we need it.</div>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase-dot v3">V3</div>
+        <div class="phase-content">
+          <div class="phase-title">Scale — Multi-Region + ML</div>
+          <div class="phase-desc">Multi-region reads, dense-city sub-cell tuning, ML-based scoring, experiments framework. Pay for this complexity only when product and metrics prove it's worth it.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- S4: SCALE -->
+  <div class="section" id="s4">
+    <div class="section-header">
+      <span class="section-num">§ 04</span>
+      <div>
+        <div class="section-title">Estimate Scale</div>
+        <div class="section-hint">Round numbers — shape matters more than precision</div>
+      </div>
+    </div>
+
+    <div class="say-block">
+      <div class="say-label">Open scale with this</div>
+      <div class="say-text">
+        "Let me throw some round numbers — correct me if your mental model is different; I only need the <strong>shape</strong> to know where to invest in the design."
+      </div>
+    </div>
+
+    <table class="styled-table">
+      <thead><tr><th>Dimension</th><th>Ballpark</th><th>Implication for design</th></tr></thead>
+      <tbody>
+        <tr><td>Homepage reads/sec</td><td>10k–100k RPS per large region at peak</td><td>Stateless tier must scale horizontally; cache is non-negotiable</td></tr>
+        <tr><td>Read : Write ratio</td><td>100:1 vs orders + impressions</td><td>Optimize every millivolt for the read path</td></tr>
+        <tr><td>Candidates per request</td><td>Hundreds to a few thousand</td><td>Must hard-cap before expensive scoring or p99 is undefined</td></tr>
+        <tr><td>Payload size</td><td>Kilobytes–tens of KB JSON + images on CDN</td><td>Paginate long lists; don't over-fetch sections on first load</td></tr>
+        <tr><td>Server p99 budget</td><td>~100–300ms (align with interviewer)</td><td>Time-box ranking; eligibility and geo must be fast</td></tr>
+        <tr><td>Peak timing</td><td>Lunch + dinner spikes, regional</td><td>Autoscale on CPU + p99 SLO burn; precompute during valleys</td></tr>
+      </tbody>
+    </table>
+
+    <div class="say-block">
+      <div class="say-label">Close scale with one sentence</div>
+      <div class="say-text">
+        "So we're optimizing for <strong>read latency</strong>, <strong>capping work per request</strong>, and avoiding expensive scoring on an uncapped candidate set. The architecture has to reflect that."
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- S5: APIS -->
+  <div class="section" id="s5">
+    <div class="section-header">
+      <span class="section-num">§ 05</span>
+      <div>
+        <div class="section-title">APIs & Data Model</div>
+        <div class="section-hint">Thin contract — honest data ownership</div>
+      </div>
+    </div>
+
+    <div class="say-block">
+      <div class="say-label">How to introduce APIs</div>
+      <div class="say-text">
+        "The surface stays small — <span class="mono">GET /home</span> is the main one; nearby and detail/menu are their own endpoints; search is delegated. I care more about the <strong>contract and cache headers</strong> than the URL structure."
+      </div>
+    </div>
+
+    <h4>Core APIs</h4>
+    <div class="code-block">
+<span class="code-comment">// Primary endpoint</span>
+<span class="code-key">GET</span> <span class="code-val">/v1/home?lat=&lng=&addr_id=</span>
+  <span class="code-comment">// Returns structured sections: reorder, near-you, promos, cuisine chips</span>
+  <span class="code-comment">// Optional: ?section=nearby for lazy-loading heavy rails</span>
+  <span class="code-comment">// Headers: Authorization, If-None-Match (ETag), X-Trace-Id, X-Experiment-Cohort</span>
+
+<span class="code-key">GET</span> <span class="code-val">/v1/restaurants/nearby?lat=&lng=&cursor=</span>
+  <span class="code-comment">// Paginated list for "near you" section</span>
+
+<span class="code-key">GET</span> <span class="code-val">/v1/restaurants/{id}</span>          <span class="code-comment">// Detail page handoff</span>
+<span class="code-key">GET</span> <span class="code-val">/v1/restaurants/{id}/menu</span>      <span class="code-comment">// Menu (often its own service)</span>
+<span class="code-key">GET</span> <span class="code-val">/v1/search?q=&lat=&lng=</span>        <span class="code-comment">// Delegated to Search Service</span>
+    </div>
+
+    <h4>Storage by access pattern — say this clearly</h4>
+
+    <div class="say-block">
+      <div class="say-label">Storage ownership line</div>
+      <div class="say-text">
+        "Orders live in <strong>relational OLTP</strong> where invariants matter. Menus are document-friendly — flexible schema, fat JSON for reads. Search needs an inverted index, not SQL LIKE at scale. Hot geo lists live in Redis. Metrics are defined from order facts in the warehouse — <strong>Redis can mirror for speed, but it never defines truth</strong>."
+      </div>
+    </div>
+
+    <table class="styled-table">
+      <thead><tr><th>Store</th><th>Holds</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>OLTP SQL</td><td>Orders, order lines, payments</td><td>ACID — money stuff needs invariants</td></tr>
+        <tr><td>Document / JSON column</td><td>Menu read models, modifiers, item variants</td><td>Flexible schema; no joins needed for reads</td></tr>
+        <tr><td>Search index (OpenSearch)</td><td>Restaurant text + facets + geo filter</td><td>Inverted index — LIKE queries don't scale</td></tr>
+        <tr><td>Redis / in-memory</td><td>Hot geo cell lists, featured sets, rate limit counters</td><td>Sub-millisecond reads for the hot path</td></tr>
+        <tr><td>OLAP / data lake</td><td>Order facts, impressions, training data, BI</td><td>Cheap scans; defines business metrics</td></tr>
+      </tbody>
+    </table>
+
+    <div class="insight-block">
+      <div class="insight-label">🔑 Strong Hire Line</div>
+      "'Most ordered restaurant' is computed from order facts in the warehouse. Redis might mirror it for speed, but it doesn't <em>define</em> it. This distinction matters for correctness of business metrics."
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- S6: ARCHITECTURE -->
+  <div class="section" id="s6">
+    <div class="section-header">
+      <span class="section-num">§ 06</span>
+      <div>
+        <div class="section-title">High-Level Architecture</div>
+        <div class="section-hint">Walk it like a pipeline — then pause and ask where to go deeper</div>
+      </div>
+    </div>
+
+    <div class="say-block">
+      <div class="say-label">Narrate the diagram — don't just list boxes</div>
+      <div class="say-text">
+        "Think of this as a <strong>read funnel</strong>. Client hits CDN for images, gateway for auth and rate limiting, then a homepage service that's basically: locate → geo candidates → filter → rank → assemble. Behind it: a spatial index, catalog, features, hot stuff in Redis, and orders feeding Kafka → OLAP for aggregates — <strong>none of the aggregation is on the critical read path</strong>."
+      </div>
+    </div>
+
+    <div class="code-block">
+<span class="code-comment">┌─────────────────────────────────────────────────────────────┐</span>
+<span class="code-comment">│                         CLIENT                              │</span>
+<span class="code-comment">│             Mobile App / Web Browser                        │</span>
+<span class="code-comment">└──────────────┬──────────────────────────┬───────────────────┘</span>
+               <span class="code-val">│ images/static              │ API calls</span>
+               <span class="code-val">▼                            ▼</span>
+<span class="code-comment">         ┌─────────┐           ┌──────────────┐</span>
+<span class="code-comment">         │   CDN   │           │ API Gateway  │ ◄── auth, rate limit, routing</span>
+<span class="code-comment">         └─────────┘           └──────┬───────┘</span>
+                                       <span class="code-val">│</span>
+                               <span class="code-comment">┌──────▼───────────────────────┐</span>
+                               <span class="code-comment">│       Homepage Service (BFF) │</span>
+                               <span class="code-comment">│  locate → geo → filter       │</span>
+                               <span class="code-comment">│         → rank → assemble    │</span>
+                               <span class="code-comment">└──┬──────────┬───────────┬────┘</span>
+                                  <span class="code-val">│</span>            <span class="code-val">│</span>           <span class="code-val">│</span>
+                        <span class="code-comment">┌─────▼──┐  ┌────▼────┐  ┌───▼─────┐</span>
+                        <span class="code-comment">│Spatial │  │ Catalog │  │  Redis  │</span>
+                        <span class="code-comment">│ Index  │  │  DB     │  │  Cache  │</span>
+                        <span class="code-comment">│(H3/geo)│  │(+menus) │  │(hot geo)│</span>
+                        <span class="code-comment">└────────┘  └─────────┘  └─────────┘</span>
+
+<span class="code-comment">  Writes (async, off hot path):</span>
+<span class="code-comment">  Impressions/Clicks → Kafka → OLAP → training data, aggregates</span>
+<span class="code-comment">  Orders → OLTP SQL → Kafka → OLAP (metrics source of truth)</span>
+    </div>
+
+    <div class="say-block">
+      <div class="say-label">After drawing, steer the conversation</div>
+      <div class="say-text">
+        "Before I go deeper — does this split make sense? And where would you like me to zoom in: <strong>geo and the spatial index</strong>, <strong>the ranking pipeline</strong>, or <strong>caching strategy and failure modes</strong>?"
+      </div>
+    </div>
+
+    <h4>Architecture decision — take a stance</h4>
+    <div class="think-block">
+      <div class="think-label">Your default opinion on structure</div>
+      "I'd structure this as a thin gateway, one homepage service in BFF style, with geo and ranking as internal components — not separate services yet. This keeps latency controllable and isolates complexity in one place. If the org grows and teams want ownership boundaries, I'd split ranking into its own service. But I wouldn't pay for that complexity in v1."
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- S7: DEEP DIVE -->
+  <div class="section" id="s7">
+    <div class="section-header">
+      <span class="section-num">§ 07</span>
+      <div>
+        <div class="section-title">Deep Dive: GET /home End-to-End</div>
+        <div class="section-hint">This is where Bar Raiser time lives — ~20 min</div>
+      </div>
+    </div>
+
+    <p>Walk through the request like a debugger. Each step should answer: what does this component do, what can go wrong, and how do I handle it?</p>
+
+    <div class="say-block">
+      <div class="say-label">Set up the deep dive</div>
+      <div class="say-text">
+        "Let me walk <span class="mono">GET /home</span> end-to-end. I'll narrate the critical path first, then the main optimizations. <strong>The default path</strong>: cap geo → hydrate batch → two-stage rank with deadline → assemble. The <strong>first optimization</strong> is almost always the candidate cap and single-flight on hot cells — not a cleverer model."
+      </div>
+    </div>
+
+    <h4>Step-by-step pipeline</h4>
+
+    <div class="collapsible open">
+      <div class="collapse-header" onclick="toggle(this)">
+        <span class="collapse-title">Step 1 — Auth at Gateway + Location Resolution</span>
+        <span class="collapse-icon">▼</span>
+      </div>
+      <div class="collapse-body">
+        <p><strong>What happens:</strong> Auth token validated at the gateway (not inside the homepage service). Location is resolved from GPS, saved address, or fallback to coarse/IP location.</p>
+        <p><strong>Say unprompted:</strong> "We log which source was used — GPS, saved address, IP fallback — because half the weird tickets in prod are location quality issues, not service bugs."</p>
+        <p><strong>Edge case:</strong> GPS is noisy or missing → prefer saved address first, fall back to coarse with product-level disclosure if required.</p>
+      </div>
+    </div>
+
+    <div class="collapsible">
+      <div class="collapse-header" onclick="toggle(this)">
+        <span class="collapse-title">Step 2 — Geo Candidates (Spatial Index)</span>
+        <span class="collapse-icon">▼</span>
+      </div>
+      <div class="collapse-body">
+        <p><strong>What happens:</strong> Query spatial index using H3 or geohash — query the cell the user is in <em>plus adjacent neighbors</em>. Cap the result at N candidates (say, 200–500).</p>
+        <p><strong>Why neighbors?</strong> A restaurant just across a geohash cell boundary would disappear without this. This fixes the classic boundary miss bug.</p>
+        <p><strong>Dense areas:</strong> In central Amsterdam, hundreds of restaurants might be in one cell. Sub-partition or enforce a strict cap — otherwise ranking blows your p99.</p>
+        <p><strong>Say unprompted:</strong> "Cell plus neighbors avoids boundary misses. We cap candidates in dense areas — otherwise we'd score 800 restaurants per request and p99 becomes meaningless."</p>
+      </div>
+    </div>
+
+    <div class="collapsible">
+      <div class="collapse-header" onclick="toggle(this)">
+        <span class="collapse-title">Step 3 — Hard Eligibility Filter (STRICT)</span>
+        <span class="collapse-icon">▼</span>
+      </div>
+      <div class="collapse-body">
+        <p><strong>What happens:</strong> Filter the candidate set: not hard-closed, in delivery zone, not paused, passes any compliance flags. This is a yes/no pass.</p>
+        <p><strong>This never degrades.</strong> Even if ranking is down, even if we're under extreme load — eligibility filtering stays correct. A restaurant fails eligibility, it's not on the page. Full stop.</p>
+        <p><strong>Quick win:</strong> Pre-compute an "open now" bitmap or next_open_at for each restaurant. Filter out obviously closed ones before they ever hit the expensive ranking step.</p>
+      </div>
+    </div>
+
+    <div class="collapsible">
+      <div class="collapse-header" onclick="toggle(this)">
+        <span class="collapse-title">Step 4 — Batch Hydration (Catalog)</span>
+        <span class="collapse-icon">▼</span>
+      </div>
+      <div class="collapse-body">
+        <p><strong>What happens:</strong> Fetch card fields for all eligible candidates — name, images, rating, fee rules, tags — in one batch call, not N individual lookups.</p>
+        <p><strong>Say unprompted:</strong> "Batch fetch to avoid N+1. If we fire one DB call per restaurant on a list of 200, that's a 200-call fan-out on the hot path — instant p99 problem."</p>
+        <p><strong>Cache:</strong> Restaurant metadata is a great Redis candidate — it changes infrequently. Short TTL + event-driven invalidation on merchant edits.</p>
+      </div>
+    </div>
+
+    <div class="collapsible">
+      <div class="collapse-header" onclick="toggle(this)">
+        <span class="collapse-title">Step 5 — Two-Stage Ranking (Time-Boxed)</span>
+        <span class="collapse-icon">▼</span>
+      </div>
+      <div class="collapse-body">
+        <p><strong>Stage 1 — Wide retrieve:</strong> Score all eligible candidates cheaply — distance, rating, basic popularity. Keep top-K' (say, 50).</p>
+        <p><strong>Stage 2 — Re-rank:</strong> Apply richer scoring (CTR history, user affinity, business rules) to just the top-K' set. This is where personalization plugs in if in scope.</p>
+        <p><strong>Deadline:</strong> Ranking has a hard time budget — say 80–150ms. If it times out, fall back to distance + popularity ordering. Eligibility still holds — we just serve a simpler order.</p>
+        <p><strong>Say unprompted:</strong> "Two-stage retrieve-and-rerank lets me control latency. I score cheap on the wide set, expensive only on the short list. And ranking is always time-boxed — on timeout, fallback order, not a blank page."</p>
+      </div>
+    </div>
+
+    <div class="collapsible">
+      <div class="collapse-header" onclick="toggle(this)">
+        <span class="collapse-title">Step 6 — Assembly + Response</span>
+        <span class="collapse-icon">▼</span>
+      </div>
+      <div class="collapse-body">
+        <p><strong>What happens:</strong> Assembler builds the page sections. Mixer injects promo slots and experiment variants without polluting core rank invariants. Sets ETag for conditional GETs.</p>
+        <p><strong>CDN:</strong> Images are served from CDN, not the API response. The response payload is JSON only.</p>
+        <p><strong>ETag:</strong> If the ranked list hasn't changed (same restaurant set, same order), return a 304 Not Modified. Saves bandwidth on frequent refreshes.</p>
+        <p><strong>Experiment slots:</strong> If an A/B test needs to inject a sponsored restaurant at position 3, that goes through the mixer — not directly into the ranker — so we can audit and rollback without touching core logic.</p>
+      </div>
+    </div>
+
+    <h4>Caching policy — explicit about which layer</h4>
+    <table class="styled-table">
+      <thead><tr><th>Layer</th><th>Content</th><th>TTL / Policy</th></tr></thead>
+      <tbody>
+        <tr><td>CDN</td><td>Images, static campaigns</td><td>Long TTL + explicit purge on change</td></tr>
+        <tr><td>Edge / API cache</td><td>Section fragments (vary by location bucket)</td><td>Short TTL — 30–60s; never vary by exact GPS coordinate</td></tr>
+        <tr><td>Redis</td><td>Per-cell restaurant lists, featured sets</td><td>Stampede protection: single-flight + TTL jitter</td></tr>
+        <tr><td>App config cache</td><td>Feature flags, experiment configs</td><td>Minutes — refresh in background</td></tr>
+      </tbody>
+    </table>
+
+    <div class="insight-block">
+      <div class="insight-label">Production War Story — Say This If Asked About Incidents</div>
+      "The classic prod incident here is a cache stampede: a hot cell's Redis key expires, 500 concurrent requests all miss at once, and you hammer the DB. The fix is single-flight (only one request refills the cache, others wait) plus TTL jitter (randomize expiry by ±10–20% so keys don't all expire simultaneously). Also warm critical keys on deploy."
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- S8: BOTTLENECKS -->
+  <div class="section" id="s8">
+    <div class="section-header">
+      <span class="section-num">§ 08</span>
+      <div>
+        <div class="section-title">Scaling & Bottlenecks</div>
+        <div class="section-hint">Name what breaks first — then the fix sounds obvious</div>
+      </div>
+    </div>
+
+    <div class="say-block">
+      <div class="say-label">Frame the bottleneck discussion</div>
+      <div class="say-text">
+        "If we 10x traffic, the <strong>shape stays the same</strong> — I just get more aggressive on caps, caching, and rank deadlines. The eligibility rules don't change, we just apply them cheaper. The three bottlenecks I'd monitor first are: <strong>hot geocells</strong>, <strong>rank tail latency</strong>, and <strong>cache stampede</strong>."
+      </div>
+    </div>
+
+    <div class="bottleneck-grid">
+      <div class="bottleneck-card">
+        <div class="bottleneck-name">🔥 Hot Geocell</div>
+        <div class="bottleneck-desc">Dense city center — a single geohash cell has 500+ restaurants. Every request queries the same shard → tail latency, shard overload.</div>
+        <div class="bottleneck-fix">Fix: sub-partition cell, read replicas, enforce strict candidate cap, backoff on shard overload</div>
+      </div>
+      <div class="bottleneck-card">
+        <div class="bottleneck-name">⏱ Ranker p99 Tail</div>
+        <div class="bottleneck-desc">Ranking is the most expensive step. Under load or model complexity, p99 blows the budget and drags the whole response.</div>
+        <div class="bottleneck-fix">Fix: hard time-box on ranker, circuit breaker, fallback to distance/popularity ordering</div>
+      </div>
+      <div class="bottleneck-card medium">
+        <div class="bottleneck-name">💥 Cache Stampede</div>
+        <div class="bottleneck-desc">Popular cell TTL expires. All concurrent requests miss cache simultaneously. DB gets hammered. p99 spikes.</div>
+        <div class="bottleneck-fix">Fix: single-flight (only one refills), TTL jitter (±10–20%), proactive warming on deploy</div>
+      </div>
+      <div class="bottleneck-card medium">
+        <div class="bottleneck-name">📍 Bad GPS / Location</div>
+        <div class="bottleneck-desc">Noisy or incorrect GPS puts user in wrong cell → shows wrong restaurants → trust broken.</div>
+        <div class="bottleneck-fix">Fix: prefer saved address, log location source, UX disclosure for coarse fallback</div>
+      </div>
+      <div class="bottleneck-card low">
+        <div class="bottleneck-name">🌡 Cold Cache on Deploy</div>
+        <div class="bottleneck-desc">New deployment clears Redis. First requests after deploy hammer the DB until cache warms up.</div>
+        <div class="bottleneck-fix">Fix: warm critical cell keys during deploy, gradual rollout / blue-green deployment</div>
+      </div>
+      <div class="bottleneck-card low">
+        <div class="bottleneck-name">📋 Stale Menu / Price</div>
+        <div class="bottleneck-desc">User sees "£10" on homepage, gets to menu and it's £12. Creates support tickets and erodes trust.</div>
+        <div class="bottleneck-fix">Fix: version keys on card payload, short TTL on price fields, event-driven invalidation on merchant edits</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- S9: RELIABILITY -->
+  <div class="section" id="s9">
+    <div class="section-header">
+      <span class="section-num">§ 09</span>
+      <div>
+        <div class="section-title">Reliability & Failure Handling</div>
+        <div class="section-hint">Degrade the fancy stuff before you degrade truth</div>
+      </div>
+    </div>
+
+    <div class="say-block">
+      <div class="say-label">The reliability principle</div>
+      <div class="say-text">
+        "My priority order when something degrades: shed <strong>personalization rails first</strong>, then promos, then trending. <strong>Never</strong> shed eligibility correctness or the core 'near you' list. Ranking down does not mean empty page — it means fallback ordering. Users can still order."
+      </div>
+    </div>
+
+    <h4>Degradation priority (shed in this order)</h4>
+    <div class="pipeline">
+      <div class="pipe-step" style="border-left: 3px solid var(--uber-red);">
+        <div class="pipe-step-num">KEEP</div>
+        <div class="pipe-step-name" style="color:var(--uber-green)">Eligibility</div>
+        <div class="pipe-step-note">Never shed — it's the trust boundary</div>
+      </div>
+      <div class="pipe-step" style="border-left: 3px solid var(--uber-green);">
+        <div class="pipe-step-num">KEEP</div>
+        <div class="pipe-step-name" style="color:var(--uber-green)">Near You List</div>
+        <div class="pipe-step-note">Core of the homepage</div>
+      </div>
+      <div class="pipe-step" style="border-left: 3px solid var(--uber-amber);">
+        <div class="pipe-step-num">OPTIONAL</div>
+        <div class="pipe-step-name" style="color:var(--uber-amber)">Ranking Quality</div>
+        <div class="pipe-step-note">Fall back to distance + popularity</div>
+      </div>
+      <div class="pipe-step" style="border-left: 3px solid var(--uber-red);">
+        <div class="pipe-step-num">SHED FIRST</div>
+        <div class="pipe-step-name" style="color:var(--uber-red)">Personalization</div>
+        <div class="pipe-step-note">Generic feed beats broken page</div>
+      </div>
+      <div class="pipe-step" style="border-left: 3px solid var(--uber-red);">
+        <div class="pipe-step-num">SHED FIRST</div>
+        <div class="pipe-step-name" style="color:var(--uber-red)">Promos / Sponsored</div>
+        <div class="pipe-step-note">Revenue loss < trust loss</div>
+      </div>
+    </div>
+
+    <h4>Dependency behavior</h4>
+    <table class="styled-table">
+      <thead><tr><th>Dependency</th><th>On Failure / Timeout</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Ranker</td><td>Fall back to distance + popularity ordering; still serve eligible restaurants</td><td>Circuit breaker; never propagate ranker failure to 500</td></tr>
+        <tr><td>Feature store / personalization</td><td>Drop personalization rails; serve generic trending</td><td>Bulkhead: separate thread pool so ranker slow ≠ whole service slow</td></tr>
+        <tr><td>Catalog hydration</td><td>Return minimal card (name + id only) or drop card</td><td>Retry idempotent reads with backoff + jitter; cap retries</td></tr>
+        <tr><td>Spatial index</td><td>Fail closed (no results better than wrong results)</td><td>Alert on empty-cell anomaly; this is not expected to be flaky</td></tr>
+        <tr><td>Redis / cache</td><td>Miss cache, hit DB; accept latency spike</td><td>Single-flight prevents stampede; don't fail the request on cache miss</td></tr>
+      </tbody>
+    </table>
+
+    <div class="think-block">
+      <div class="think-label">Retry policy — get this right</div>
+      "Retry only idempotent reads, with exponential backoff and jitter. Never retry on timeout — that doubles your load. Circuit breaker trips after N failures in a window, then probes with a fraction of traffic. Bulkhead means one slow dependency can't exhaust all worker threads."
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- S10: TRADEOFFS -->
+  <div class="section" id="s10">
+    <div class="section-header">
+      <span class="section-num">§ 10</span>
+      <div>
+        <div class="section-title">Tradeoffs & Alternatives</div>
+        <div class="section-hint">Name the trade, pick a side, say what would change your mind</div>
+      </div>
+    </div>
+
+    <div class="warn-block">
+      <strong>Bar raiser watch:</strong> they're listening for fence-sitters. "We could do A or B" with no pick reads as junior. Always say "I'd start with X because Y — I'd revisit if Z."
+    </div>
+
+    <h4>Key tradeoffs</h4>
+
+    <div class="tradeoff-row tradeoff-header">
+      <div class="tradeoff-cell">Decision</div>
+      <div class="tradeoff-cell">Upside</div>
+      <div class="tradeoff-cell">Downside / When to reconsider</div>
+    </div>
+
+    <div class="tradeoff-row">
+      <div class="tradeoff-cell decision">Online ranking<br>(live scoring)</div>
+      <div class="tradeoff-cell up">Fresher personalization; adapts to real-time signals</div>
+      <div class="tradeoff-cell down">p99 tail risk; ranker is now on the critical path</div>
+    </div>
+    <div class="tradeoff-row">
+      <div class="tradeoff-cell decision">Precomputed ranking</div>
+      <div class="tradeoff-cell up">Stable, predictable latency; no ranking in hot path</div>
+      <div class="tradeoff-cell down">Staleness; needs a background pipeline to refresh</div>
+    </div>
+    <div class="tradeoff-row">
+      <div class="tradeoff-cell decision">H3 / geohash<br>in Redis</div>
+      <div class="tradeoff-cell up">Sub-ms reads; simple data structure; easy sharding</div>
+      <div class="tradeoff-cell down">Stale if invalidation is weak; polygon-level precision limited</div>
+    </div>
+    <div class="tradeoff-row">
+      <div class="tradeoff-cell decision">PostGIS for geo</div>
+      <div class="tradeoff-cell up">True polygon queries; better for complex zone shapes</div>
+      <div class="tradeoff-cell down">More ops complexity; harder to shard; higher per-query cost</div>
+    </div>
+    <div class="tradeoff-row">
+      <div class="tradeoff-cell decision">BFF monolith<br>(homepage svc)</div>
+      <div class="tradeoff-cell up">Low latency — no service hops; velocity; easy to own</div>
+      <div class="tradeoff-cell down">Blast radius when teams scale; need to split when org matures</div>
+    </div>
+    <div class="tradeoff-row">
+      <div class="tradeoff-cell decision">Split ranking service</div>
+      <div class="tradeoff-cell up">Teams can own independently; easier to scale separately</div>
+      <div class="tradeoff-cell down">Network hop adds latency; more infra to operate</div>
+    </div>
+
+    <div class="say-block">
+      <div class="say-label">Your default opinion — say this confidently</div>
+      <div class="say-text">
+        "My default: <strong>cell + neighbors + cap in Redis</strong> for geo on v1 — fast, simple, good enough. I'd add PostGIS when polygon reporting requirements force it. For ranking: <strong>two-stage + deadline + fallback</strong>. I'd add precomputed ranking only when metrics prove the tail latency is a real problem — not speculatively."
+      </div>
+    </div>
+
+    <h4>Observability — prove your story</h4>
+    <ul class="checklist">
+      <li>One trace per <span class="mono">GET /home</span> with spans: auth, location, geo, hydrate, rank, assemble — so when p99 moves I know which hop</li>
+      <li>Dashboard: fallback rate, empty-cell rate, ranker timeout rate, location source mix (GPS vs saved vs IP)</li>
+      <li>Alerts: sustained ranker failures → PagerDuty; empty-cell anomaly (> threshold) → Slack; Kafka consumer lag vs SLA</li>
+      <li>SLI: homepage p99, error rate by section, cache hit ratio, ranker timeout rate</li>
+      <li>Business metrics defined from OLTP/OLAP — Redis mirrors with documented lag, never defines truth</li>
+    </ul>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- S11: BAR RAISER FOLLOW-UPS -->
+  <div class="section" id="s11">
+    <div class="section-header">
+      <span class="section-num">§ 11</span>
+      <div>
+        <div class="section-title">Bar Raiser Follow-Ups & 60s Close</div>
+        <div class="section-hint">2–4 sentences each, then stop and let them steer</div>
+      </div>
+    </div>
+
+    <h4>Common Bar Raiser probes — how to answer</h4>
+
+    <div class="faq-item open">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span class="faq-q-text">"How do you handle new restaurants being cold-started? They have no CTR history."</span>
+        <span class="faq-q-tag">Ranking depth</span>
+      </div>
+      <div class="faq-a">
+        Cold-start is a classic explore-exploit problem. I'd reserve a small number of exploration slots — say 5% — where new restaurants are shown regardless of history, then we measure their actual CTR. For scoring, fall back to category-level or city-level priors until we have enough signal. I'd also watch impression share by restaurant tenure on a dashboard — if new restaurants never get surfaced, that's a product and fairness problem, not just a ranking one.
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span class="faq-q-text">"What happens if we need to expand to multi-region — say Amsterdam and London on the same stack?"</span>
+        <span class="faq-q-tag">Scale / global</span>
+      </div>
+      <div class="faq-a">
+        Catalog and spatial data are partitioned by region from the start — each region gets its own shard/instance. User reads hit their local region. Analytics and order aggregates are eventually consistent globally — that's fine, we don't need real-time global rollups for the homepage. The main thing I'd add is a regional config layer so business rules (zones, compliance) are applied locally without crossing regions.
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span class="faq-q-text">"What's the difference between your search index and your geo nearby index?"</span>
+        <span class="faq-q-tag">Data model</span>
+      </div>
+      <div class="faq-a">
+        Different access patterns, different indexes. The nearby index is purely spatial — cell → restaurant IDs, fast lookup, Redis-friendly. The search index is text + facets + geo filter, built in OpenSearch or similar — it powers "sushi near me" queries with relevance scoring. They share the same restaurant ID as a key, and you join in the BFF layer if you need both. I wouldn't try to do text search in the geo index or vice versa.
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span class="faq-q-text">"How do you prevent a bad deploy from breaking the homepage for everyone at once?"</span>
+        <span class="faq-q-tag">Operational safety</span>
+      </div>
+      <div class="faq-a">
+        Feature flags are the main tool — I can toggle ranking changes, new sections, or experiment slots without redeploying. For ranking specifically, I'd dark-launch first: run the new ranker in shadow alongside the current one, compare output, then gradually shift traffic. Cache versioning means old and new cached data coexist during rollout. And I'd set an error budget SLO alert so if the fallback rate spikes above N%, we pause the rollout automatically.
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span class="faq-q-text">"Your design shows ranking in the hot path. What if the ML model takes 500ms? Isn't that a problem?"</span>
+        <span class="faq-q-tag">Ranking vs latency</span>
+      </div>
+      <div class="faq-a">
+        Yes, that's exactly why ranking is time-boxed. If the model exceeds its budget — say 150ms — we cut it off and serve whatever partial result we have, or fall back to distance + popularity. The user gets a correctly eligible list in a sensible fallback order. If 500ms becomes the norm, that's a signal to precompute more of the ranking offline and do lighter online blending. I'd track "ranking fallback rate" as a first-class SLI — if it's above 5%, we have a problem to fix.
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span class="faq-q-text">"Walk me through a user opening the app right as a restaurant is closing."</span>
+        <span class="faq-q-tag">Race condition / edge case</span>
+      </div>
+      <div class="faq-a">
+        Classic race condition. The restaurant appears on homepage based on cached state that says it's open. User taps through — at menu load or cart add, we do a stricter read of current status and block ordering if it's now closed. The homepage can be slightly stale; the order placement path must be fresh. We also have a short TTL on open/closed status in the cache — say 60s — plus event-driven invalidation when a merchant toggles their state. And we expose "opens at" on the card so users understand the situation.
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <h3>60-Second Close</h3>
+
+    <div class="say-block">
+      <div class="say-label">End with this — confident, no new ideas</div>
+      <div class="say-text">
+        "To summarize what we built: a <strong>read funnel</strong> — geo candidates capped with neighbor cells, batch hydration to avoid N+1, two-stage ranking under a hard deadline with fallback ordering, aggressive caching where staleness is acceptable. Orders stay ACID in SQL. Metrics are defined from the warehouse, not from cache. And the one invariant I held throughout: <strong>eligibility stays correct even when ranking degrades</strong>. If you were to push me on one thing to evolve first, it'd be precomputing more of the ranking offline — once we have the traffic data to prove it's worth the pipeline complexity."
+      </div>
+    </div>
+
+    <div class="closing-card">
+      <div class="closing-title">You've got this. 🎙</div>
+      <p class="closing-text">The bar raiser wants to see you think out loud, take ownership of decisions, and design honestly — not present a perfect memorized answer.</p>
+      <div class="closing-pills">
+        <span class="closing-pill">Clarify first</span>
+        <span class="closing-pill">Invariant: eligibility never lies</span>
+        <span class="closing-pill">Cap candidates early</span>
+        <span class="closing-pill">Time-box ranking</span>
+        <span class="closing-pill">Degrade gracefully</span>
+        <span class="closing-pill">Metrics from facts, not cache</span>
+        <span class="closing-pill">Always pick a side</span>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+  function scrollTo(id) {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.querySelectorAll('.nav-step').forEach(s => s.classList.remove('active'));
+    event.currentTarget.classList.add('active');
+  }
+
+  function toggle(header) {
+    const c = header.closest('.collapsible');
+    c.classList.toggle('open');
+  }
+
+  function toggleFaq(header) {
+    const item = header.closest('.faq-item');
+    item.classList.toggle('open');
+  }
+
+  // Auto-highlight nav step on scroll
+  const sections = ['s0','s1','s2','s3','s4','s5','s6','s7','s8','s9','s10','s11'];
+  const steps = document.querySelectorAll('.nav-step');
+
+  window.addEventListener('scroll', () => {
+    let current = 0;
+    sections.forEach((id, i) => {
+      const el = document.getElementById(id);
+      if (el && el.getBoundingClientRect().top < 140) current = i;
+    });
+    steps.forEach((s, i) => {
+      s.classList.toggle('active', i === current);
+    });
+  });
+</script>
+</body>
+</html>
