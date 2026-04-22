@@ -1,82 +1,26 @@
 # HLD — Real-Time Driver Tracking System
 
-## Live interview opening (say naturally)
+## Live interview opening (clarify first — bar raiser order)
 
-*“I’ll start from the **user perspective**, clarify key requirements, then design **high-level architecture** and go deeper on the **most critical** part. I’ll **pause after the diagram** in case you want to go deeper into any section.”*
-
-## User journey (say once early)
-
-*“From the user perspective: **(prep: one–two lines for this system)**.”*
-
-*“So: **write path** = … ; **read path** = … ; **async path** = ….”* — fill with concrete nouns from **Section 1** and your diagram as you speak.
-
-## Thinking transitions (use during interview)
-
-- *“Let me think through this…”*
-- *“One tradeoff here is…”*
-- *“If I optimize for latency…”*
-- *“This might become a bottleneck because…”*
-- *“I’d start simple here and evolve later…”*
-
-## Consistency model
-
-*“**Strong** consistency for **(critical part)** because **(reason)** ; **eventual** for **(non-critical)** because **(reason)** . Under load we prioritize **(latency / correctness / availability)** on **(which surface)** .”* — align with **Section 1 invariants** and any dedicated consistency blocks in this guide.
-
-## Decision (strong opinion)
-
-*“I’d start with **X** because **(reason)** . If **(scale / requirements / signals)** change, I’d evolve to **Y**.”* — state your real default from **Section 8** in the room.
-
-## Evolution
-
-| Phase | Say it like this |
-|-------|------------------|
-| **1** | Simple implementation that ships. |
-| **2** | Scaling: partitions, caches, queues, backpressure, observability. |
-| **3** | Advanced / ML / global—only when metrics or product force it. |
-
-Details: **Section 4.1 (phases)** and **Section 5** in this file.
-
-## Bottleneck anchor
-
-*“The main bottlenecks I expect are **(1)** and **(2)** —that’s what I’d monitor first.”* — concrete wording lives under **Section 5 — Bottleneck** in this guide.
-
-## UX awareness
-
-*“If this behaves badly, users see **(impact)** —so we prioritize **(trust lever)** .”* — tie to **reliability / degrade / UX** sections later in this guide.
-
-## Driving the conversation
-
-- *“Does this direction make sense?”*
-- *“Should I go deeper on **A** or **B**?”*
-- *“Would you like failure scenarios next?”*
-
-## Mindset (before you walk in)
-
-*“I’m not presenting a solution—I’m **designing with a teammate**.”*
-
-**Rehearsal beats editing:** speak aloud, practice **pauses**, simulate **interruptions**. **Playbook:** [HLD-BAR-RAISER-PERFORMANCE-PACK.md](./HLD-BAR-RAISER-PERFORMANCE-PACK.md).
-
----
+*“I’ll **start by clarifying requirements**—scope, ambiguity, latency and scale expectations—then lock **FR/NFR**. **After** that, I’ll ground **user journey**, **consistency**, **commit/decision**, and **risks** so it’s clearly **derived from what we agreed**, then **scale** and **architecture**—and I’ll **pause after the diagram** for where you want depth.”*
 
 <a id="interview-spine-nine-steps"></a>
 
-> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **Framing after requirements** (user journey, consistency, commit/decision anchors) → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
 
 ## Interview delivery (golden thread — live thinking)
 
-Bar-raiser polish: **user-first**, **explicit consistency**, **bottleneck**, **evolution**, **UX trust**, **default opinion** (not endless “A or B”). Full template + anti–document-mode habits: **[HLD-BAR-RAISER-PERFORMANCE-PACK.md](./HLD-BAR-RAISER-PERFORMANCE-PACK.md)** (final lines + sections) · **[HLD-MASTER-DELIVERY-GOLDEN-FLOW.md](./HLD-MASTER-DELIVERY-GOLDEN-FLOW.md)** (golden flow + anti-doc table).
+Bar-raiser polish: **user-first**, **explicit consistency**, **bottleneck**, **evolution**, **UX trust**, **default opinion** (not endless “A or B”). Full template + habits: **[HLD-BAR-RAISER-PERFORMANCE-PACK.md](./HLD-BAR-RAISER-PERFORMANCE-PACK.md)** · **[HLD-MASTER-DELIVERY-GOLDEN-FLOW.md](./HLD-MASTER-DELIVERY-GOLDEN-FLOW.md)**.
 
-| Say early (out loud) | What interviewers grade | In this guide, nail it by… |
-|---------------------|---------------------------|------------------------------|
-| **User journey** | Product before boxes | Opening Section 1 with who does what; separate **read / write / async** before services. |
-| **Consistency model** | Strong vs eventual, where | Stating **invariants** and what is **strict vs best-effort** before API trivia. |
-| **Bottleneck anchor** | What breaks first | Naming Section 5 **Bottleneck** + Section 6 hot paths + **first SLIs**. |
-| **Evolution** | MVP → scale → advanced | Using **v1 / v2 / v3** (often Section 4.1 + Section 5); say **when** complexity earns its keep. |
-| **UX awareness** | Trust on degrade | Saying what the user **sees** on partial failure (honest empty vs wrong vs spin forever). |
-| **Strong opinion** | Defaults | *“I’d start with **X** because …; I’d switch to **Y** if …”*—lead Section 8 with a pick. |
+| Say at the right time | What interviewers grade | In this guide |
+|----------------------|---------------------------|---------------|
+| **Opening** | Clarify before solution | **Above** — you **do not** assume requirements. |
+| **User journey + consistency + decisions** | Derived, not memorized | **After Section 1**, block **Framing after requirements** — **before Section 2** (not before clarify). |
+| **Bottleneck / evolution / UX** | Ops + trust | Same **Framing** block; deep numbers still in **Sections 5–7**. |
+| **Strong opinion** | Defaults | **Section 8** tradeoffs — always *“I’d start with X because…”*. |
 
-**Do not:** read tables line-by-line · list ten patterns before a diagram · fence-sit.  
-**Do:** signpost · pause · one diagram · deep dive **only** where they steer.
+**Do not:** read tables line-by-line · put user journey **before** clarify · fence-sit.  
+**Do:** clarify → FR/NFR → **then** grounded journey → diagram → deep dive where steered.
 
 ---
 
@@ -185,6 +129,104 @@ Bar-raiser polish: **user-first**, **explicit consistency**, **bottleneck**, **e
 1. “**WebSocket / MQTT** to viewers; **gRPC** internal.”  
 2. “I’d **default to Kafka** (or Pulsar) for the **location event log**—**durability**, **replay**, **analytics** consumers; **Redis only** for **latest snapshot** + fast read path—not as the **system of record** for history.”  
 3. “**Region-local** ingest; **backpressure** when spikes hit—see [🚦 Backpressure](#backpressure-handling).”
+
+---
+
+## Framing after requirements (before scale + architecture)
+
+**Placement in the room:** this block is **not** “right after clarify questions.” You earn it **after** you’ve locked **FR + NFR** (spoken summary is fine)—otherwise journey / consistency / commit boundaries read as **assuming** product and SLOs.
+
+**Out loud:** *“We’ve **clarified** scope and I’ve stated **FR/NFR** from that—**based on that**, here’s the **user-visible path**, **consistency**, and **commit** I’ll hold before I size **Section 2** and draw **Section 4**.”*
+
+### Thinking transitions (use during interview)
+
+- *“Let me think through this…”*
+- *“One tradeoff here is…”*
+- *“If I optimize for latency…”*
+- *“This might become a bottleneck because…”*
+- *“I’d start simple here and evolve later…”*
+
+## User journey (say once—**after** FR/NFR, not after clarify alone)
+
+From the rider’s perspective: subscribe to **live map** for **their trip**; dots move as the driver streams location. From the driver’s perspective: **batched** GPS uploads while moving.
+
+So:
+
+- **write path** = driver **`POST /locations/batch`** (or stream) → **append** durable **LocationEvent** + update **LatestSnapshot** (**idempotent** on `seq` / client ts).
+- **read path** = **WS/MQTT** to **trip-scoped** viewers + **`GET …/latest`** for internal consumers—**never** global public driver tracking.
+- **async path** = **Kafka/Pulsar** log for analytics, compliance export, replay—**not** every point on OLTP trip row.
+
+## Consistency model
+
+**Append-only facts** in the log; **latest snapshot** is **overwrite** / fast read—**eventually consistent** with strict **ordering per driver** as you defined.
+
+**Decouple** high-frequency telemetry from **transactional trip DB**—backpressure before OLTP drowns.
+
+## Commit boundary
+
+An upload batch is “accepted” when:
+
+- events are **durably appended** (or you explicitly defend WAL risk)—and **`seq`** dedupe makes retries safe.
+
+**Map tile** serving is out of scope here—this service owns **points + fan-out**, not map CDN.
+
+## Decision (strong opinion)
+
+I’d start with:
+
+- **Kafka (or Pulsar)** as **system of record** for the **location event log**; **Redis** (or equivalent) for **latest snapshot** + pub/sub fan-out—not Redis as sole history store.
+
+because **replay + retention** matter for disputes and analytics; **Redis-only** loses the plot at Uber scale.
+
+If fan-out explodes:
+
+- **region-local** ingest, **sample** or **throttle** non-critical consumers, partition by **`driver_id` / trip**.
+
+## Evolution
+
+| Phase | Say it like this |
+|-------|------------------|
+| **1** | Simple implementation that ships. |
+| **2** | Scaling: partitions, caches, queues, backpressure, observability. |
+| **3** | Advanced / ML / global—only when metrics or product force it. |
+
+Details: **Section 4.1 (phases)** and **Section 5** in this file.
+
+## Bottleneck anchor
+
+Watch first:
+
+- **updates/sec/region** × **subscribers** (fan-out).
+- **WS** connection churn and **reconnect** storms.
+
+## Backpressure handling
+
+Under load:
+
+- **increase batch interval**, **drop** non-critical subscribers, **coalesce** points for downstream **ETA** consumers.
+- never **block** driver accept path on analytics lag.
+
+Goal: **rider sees smooth enough** track vs **perfect** 10 Hz for BI.
+
+## UX awareness
+
+Bad outcomes:
+
+- **jumpy** or **stale** pin on map.
+- **privacy** leak—wrong trip channel or over-broad subscription.
+- duplicate points creating **zigzag** without dedupe.
+
+### Driving the conversation
+
+- *“Does this direction make sense?”*
+- *“Should I go deeper on **A** or **B**?”*
+- *“Would you like failure scenarios next?”*
+
+### Mindset
+
+*“I’m not presenting a solution—I’m **designing with a teammate**.”*
+
+**Playbook:** [HLD-BAR-RAISER-PERFORMANCE-PACK.md](./HLD-BAR-RAISER-PERFORMANCE-PACK.md).
 
 ---
 

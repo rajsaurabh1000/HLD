@@ -1,123 +1,54 @@
 # HLD — Uber Eats Homepage
 
-## Live interview opening (say naturally)
+## Live interview opening (clarify first — bar raiser order)
 
-*“I’ll start from the **user perspective**, clarify key requirements, then design **high-level architecture** and go deeper on the **most critical** part. I’ll **pause after the diagram** in case you want to go deeper into any section.”*
+*“I’ll **start by clarifying requirements**—scope, ambiguity, latency and scale expectations—then lock **FR/NFR**. **After** that, I’ll ground **user journey**, **consistency**, **commit/decision**, and **risks** so it’s clearly **derived from what we agreed**, then **scale** and **architecture**—and I’ll **pause after the diagram** for where you want depth.”*
 
-## User journey (say once early)
+<a id="interview-spine-nine-steps"></a>
 
-“From user perspective:
-
-User opens app → location resolved → nearby restaurants fetched → ranked → homepage sections assembled.
-
-So:
-- read path = homepage fetch
-- write path = orders (separate system)
-- async path = impressions, clicks, ranking signals”
-
-## Consistency model
-
-Strong consistency for:
-- eligibility (in-zone, open/closed)
-
-Eventual consistency for:
-- ranking
-- trending
-- popularity metrics
-
-We prioritize:
-latency over freshness for homepage browse,
-but correctness for serviceability (trust)
-
-## 🔒 Commit Boundary
-
-“Homepage response is committed when:
-
-- eligibility filtering is complete (must be correct)
-- ranking is either completed OR deadline reached
-
-If ranking exceeds deadline:
-- fallback ordering is used
-
-So:
-- eligibility = strict guarantee
-- ranking = best-effort”
-
-## Decision (strong opinion)
-
-I’d start with:
-
-- geohash/H3 based geo indexing (fast + scalable)
-- Redis for hot geo cells
-- two-stage ranking (cheap + rerank)
-
-because latency is critical for homepage.
-
-If scale grows:
-- move to precomputed ranking
-- add ML-based ranking
-
-## Evolution
-
-| Phase | Say it like this |
-|-------|------------------|
-| **1** | Simple implementation that ships. |
-| **2** | Scaling: partitions, caches, queues, backpressure, observability. |
-| **3** | Advanced / ML / global—only when metrics or product force it. |
-
-Details: **Section 4.1 (phases)** and **Section 5** in this file.
-
-## Bottleneck anchor
-
-The main bottlenecks I expect:
-
-- hot geocells (dense areas)
-- ranking latency (p99 tail)
-
-That’s what I’d monitor first
-
-## 🚦 Backpressure Handling
-
-“If traffic spikes:
-
-- reduce candidate size (lower K)
-- skip personalization
-- fallback to cached results
-
-Goal:
-protect latency (p99) over ranking quality”
-
-## UX awareness
-
-If this behaves badly:
-
-- user sees empty homepage
-- wrong restaurants (out of zone)
-- slow loading experience
-
-So we prioritize:
-correct eligibility and fast response over perfect ranking
+> **Uber SDE-2 HLD — drive order in this doc:** **§1** clarify → FR → NFR → **Framing after requirements** (user journey, consistency, commit/decision anchors) → **§2** scale → **§3** core entities + APIs → **§4** architecture → **§5** deep dive and evolution → **§6** scaling → **§7** reliability → **§8** tradeoffs → **§9** observability and security → **§10** patterns → **Closing**. Treat **Human interaction** cue blocks (headings in this doc) as *spoken* cues—**paraphrase**; do not read every row. **Bar raiser** listens for **ownership**, **failure modes**, and **honest tradeoffs**. Canonical spine: [HLD-UBER-SDE2-INTERVIEW-SPINE.md](./HLD-UBER-SDE2-INTERVIEW-SPINE.md).
 
 ## Interview delivery (golden thread — live thinking)
 
-Bar-raiser polish: **user-first**, **explicit consistency**, **bottleneck**, **evolution**, **UX trust**, **default opinion** (not endless “A or B”). Full template + anti–document-mode habits: **[HLD-BAR-RAISER-PERFORMANCE-PACK.md](./HLD-BAR-RAISER-PERFORMANCE-PACK.md)** (final lines + sections) · **[HLD-MASTER-DELIVERY-GOLDEN-FLOW.md](./HLD-MASTER-DELIVERY-GOLDEN-FLOW.md)** (golden flow + anti-doc table).
+Bar-raiser polish: **user-first**, **explicit consistency**, **bottleneck**, **evolution**, **UX trust**, **default opinion** (not endless “A or B”). Full template + habits: **[HLD-BAR-RAISER-PERFORMANCE-PACK.md](./HLD-BAR-RAISER-PERFORMANCE-PACK.md)** · **[HLD-MASTER-DELIVERY-GOLDEN-FLOW.md](./HLD-MASTER-DELIVERY-GOLDEN-FLOW.md)**.
 
-| Say early (out loud) | What interviewers grade | In this guide, nail it by… |
-|---------------------|---------------------------|------------------------------|
-| **User journey** | Product before boxes | Opening Section 1 with who does what; separate **read / write / async** before services. |
-| **Consistency model** | Strong vs eventual, where | Stating **invariants** and what is **strict vs best-effort** before API trivia. |
-| **Bottleneck anchor** | What breaks first | Naming Section 5 **Bottleneck** + Section 6 hot paths + **first SLIs**. |
-| **Evolution** | MVP → scale → advanced | Using **v1 / v2 / v3** (often Section 4.1 + Section 5); say **when** complexity earns its keep. |
-| **UX awareness** | Trust on degrade | Saying what the user **sees** on partial failure (honest empty vs wrong vs spin forever). |
-| **Strong opinion** | Defaults | *“I’d start with **X** because …; I’d switch to **Y** if …”*—lead Section 8 with a pick. |
+| Say at the right time | What interviewers grade | In this guide |
+|----------------------|---------------------------|---------------|
+| **Opening** | Clarify before solution | **Above** — you **do not** assume requirements. |
+| **User journey + consistency + decisions** | Derived, not memorized | **After Section 1**, block **Framing after requirements** — **before Section 2** (not before clarify). |
+| **Bottleneck / evolution / UX** | Ops + trust | Same **Framing** block; deep numbers still in **Sections 5–7**. |
+| **Strong opinion** | Defaults | **Section 8** tradeoffs — always *“I’d start with X because…”*. |
 
-**Do not:** read tables line-by-line · list ten patterns before a diagram · fence-sit.  
-**Do:** signpost · pause · one diagram · deep dive **only** where they steer.
+**Do not:** read tables line-by-line · put user journey **before** clarify · fence-sit.  
+**Do:** clarify → FR/NFR → **then** grounded journey → diagram → deep dive where steered.
 
 ---
 
 ## 1. Clarify requirements
 
+### 1.0 Live flow (how to open and steer)
+
+<a id="live-flow-open"></a>
+
+#### Live voice (real interviewer room)
+
+**Sound like you’re *deciding*, not reciting:** one idea per breath, then **pause**. Tables here are **backup**—if your eyes are down for more than a couple of seconds, you’ve slipped into reading the doc.
+
+**Bridge phrases (mix naturally):** *“Let me **name the fork** first…”* · *“I’ll **default to X**—tell me if your bar is stricter.”* · *“The reason I ask is it changes **who owns the commit** / **what’s on the hot path**.”* · *“I’ll **over-answer** one layer, then stop—**where should I zoom**?”*
+
+**Ping them (conversation, not monologue):** *“Does that match how you’d scope it?”* · *“If we only deep-dive one thing, is it **A** or **B**?”* (swap **A/B** for two tensions from *your* opening paragraph above.)
+
+**This topic in one breath:** “Homepage is **eligibility + rank + assembly** under a **p99** budget—I’ll separate **trust** (geo/hours) from **taste** (rank).”
+
+**`Verbatim` / `Live` cues:** say a line **once**, then **rephrase** the next time—verbatim twice in a row reads *canned*.
+
+**Opening (~once):** *“I’ll align on **homepage scope**, **location + trust**, rough **p99**; then **scale**, **APIs + ownership**, **architecture**, and **`GET /home`** end-to-end. I’ll **pause after the diagram**—does that sequencing work, and where do you want depth: **geo**, **rank**, or **cache**?”*
+
+**Thinking transitions** (use **between** topics so it feels like *design*, not *recital*): *“Let me think through …”* · *“One tradeoff here is …”* · *“If I optimize for latency I’d …”* · *“Let me sanity-check …”* · *“I’d start simple and evolve when …”*
+
+**Live rule:** **Paraphrase** §1–2 tables; don’t read every row. Deeper bullets = **only if they probe**.
+
+<a id="say-1-questions-human"></a>
 ### 1.1 Clarify 
 
 | Topic | Say it like this in the room |
@@ -293,6 +224,128 @@ Bar-raiser polish: **user-first**, **explicit consistency**, **bottleneck**, **e
 3. “We **cap candidates** before expensive scoring.”  
 4. “**Ranking is time-boxed** with **fallback**.”  
 5. “**Metrics** from **order facts / OLAP**—cache only **mirrors** with known lag.”
+
+---
+
+## Framing after requirements (before scale + architecture)
+
+**Placement in the room:** this block is **not** “right after clarify questions.” You earn it **after** you’ve locked **FR + NFR** (spoken summary is fine)—otherwise journey / consistency / commit boundaries read as **assuming** product and SLOs.
+
+**Out loud:** *“We’ve **clarified** scope and I’ve stated **FR/NFR** from that—**based on that**, here’s the **user-visible path**, **consistency**, and **commit** I’ll hold before I size **Section 2** and draw **Section 4**.”*
+
+### Thinking transitions (use during interview)
+
+- *“Let me think through this…”*
+- *“One tradeoff here is…”*
+- *“If I optimize for latency…”*
+- *“This might become a bottleneck because…”*
+- *“I’d start simple here and evolve later…”*
+
+## User journey (say once—**after** FR/NFR, not after clarify alone)
+
+“From user perspective:
+
+User opens app → location resolved → nearby restaurants fetched → ranked → homepage sections assembled.
+
+So:
+- read path = homepage fetch
+- write path = orders (separate system)
+- async path = impressions, clicks, ranking signals”
+
+## Consistency model
+
+Strong consistency for:
+- eligibility (in-zone, open/closed)
+
+Eventual consistency for:
+- ranking
+- trending
+- popularity metrics
+
+We prioritize:
+latency over freshness for homepage browse,
+but correctness for serviceability (trust)
+
+## 🔒 Commit Boundary
+
+“Homepage response is committed when:
+
+- eligibility filtering is complete (must be correct)
+- ranking is either completed OR deadline reached
+
+If ranking exceeds deadline:
+- fallback ordering is used
+
+So:
+- eligibility = strict guarantee
+- ranking = best-effort”
+
+## Decision (strong opinion)
+
+I’d start with:
+
+- geohash/H3 based geo indexing (fast + scalable)
+- Redis for hot geo cells
+- two-stage ranking (cheap + rerank)
+
+because latency is critical for homepage.
+
+If scale grows:
+- move to precomputed ranking
+- add ML-based ranking
+
+## Evolution
+
+| Phase | Say it like this |
+|-------|------------------|
+| **1** | Simple implementation that ships. |
+| **2** | Scaling: partitions, caches, queues, backpressure, observability. |
+| **3** | Advanced / ML / global—only when metrics or product force it. |
+
+Details: **Section 4.1 (phases)** and **Section 5** in this file.
+
+## Bottleneck anchor
+
+The main bottlenecks I expect:
+
+- hot geocells (dense areas)
+- ranking latency (p99 tail)
+
+That’s what I’d monitor first
+
+## 🚦 Backpressure Handling
+
+“If traffic spikes:
+
+- reduce candidate size (lower K)
+- skip personalization
+- fallback to cached results
+
+Goal:
+protect latency (p99) over ranking quality”
+
+## UX awareness
+
+If this behaves badly:
+
+- user sees empty homepage
+- wrong restaurants (out of zone)
+- slow loading experience
+
+So we prioritize:
+correct eligibility and fast response over perfect ranking
+
+### Driving the conversation
+
+- *“Does this direction make sense?”*
+- *“Should I go deeper on **A** or **B**?”*
+- *“Would you like failure scenarios next?”*
+
+### Mindset
+
+*“I’m not presenting a solution—I’m **designing with a teammate**.”*
+
+**Playbook:** [HLD-BAR-RAISER-PERFORMANCE-PACK.md](./HLD-BAR-RAISER-PERFORMANCE-PACK.md).
 
 ---
 
